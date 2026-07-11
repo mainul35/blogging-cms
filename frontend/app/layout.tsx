@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
+import { cookies } from 'next/headers';
 import { getSiteSettings } from '@/lib/settings';
 import './globals.css';
 
@@ -15,6 +16,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { siteName } = await getSiteSettings();
+  const isAuthenticated = !!(await cookies()).get('token')?.value;
 
   return (
     <html lang="en">
@@ -26,7 +28,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="flex items-center gap-6">
               <a href="/blog" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Home</a>
               <a href="/blog" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Blog</a>
-              <a href="/login" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Admin Login</a>
+              {isAuthenticated ? (
+                <a href="/dashboard" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Dashboard</a>
+              ) : (
+                <a href="/login" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Admin Login</a>
+              )}
             </div>
           </nav>
         </header>

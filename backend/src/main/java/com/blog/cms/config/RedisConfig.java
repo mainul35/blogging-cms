@@ -1,6 +1,7 @@
 package com.blog.cms.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
@@ -15,12 +16,22 @@ public class RedisConfig {
     @Bean
     public ReactiveRedisTemplate<String, Object> reactiveRedisTemplate(
             ReactiveRedisConnectionFactory factory, ObjectMapper objectMapper) {
-        // Reuse Spring Boot's shared ObjectMapper (has JavaTimeModule registered) — a
-        // fresh GenericJackson2JsonRedisSerializer() with no arguments creates its own
-        // internal default mapper, which chokes on LocalDateTime fields like PostResponse's.
+        // Derive a copy of Spring Boot's shared ObjectMapper — keeps JavaTimeModule
+        // registered (so LocalDateTime fields like PostResponse's serialize correctly)
+        // — but with default typing turned on. GenericJackson2JsonRedisSerializer needs
+        // that to embed type info ("@class") in the cached JSON; without it, cache reads
+        // deserialize to a raw LinkedHashMap instead of the real DTO class, which blows
+        // up with a ClassCastException at the call site. Using a copy rather than the
+        // shared mapper directly matters: that mapper also serializes plain HTTP JSON
+        // responses, where leaking "@class" metadata to API clients would be wrong.
+        ObjectMapper redisObjectMapper = objectMapper.copy();
+        redisObjectMapper.activateDefaultTyping(
+                BasicPolymorphicTypeValidator.builder().allowIfBaseType(Object.class).build(),
+                ObjectMapper.DefaultTyping.NON_FINAL);
+
         RedisSerializationContext<String, Object> context = RedisSerializationContext
                 .<String, Object>newSerializationContext(new StringRedisSerializer())
-                .value(new GenericJackson2JsonRedisSerializer(objectMapper))
+                .value(new GenericJackson2JsonRedisSerializer(redisObjectMapper))
                 .build();
         return new ReactiveRedisTemplate<>(factory, context);
     }

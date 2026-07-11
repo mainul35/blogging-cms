@@ -316,6 +316,7 @@ export default function Editor({ value, onChange }: EditorProps) {
       ) : (
         <div className="h-80 overflow-auto p-4 prose prose-sm max-w-none
           prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded
+          prose-code:before:content-none prose-code:after:content-none
           prose-pre:bg-gray-900 prose-pre:text-gray-100">
           <ReactMarkdown
             remarkPlugins={remarkPlugins}

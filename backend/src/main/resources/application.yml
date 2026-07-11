@@ -1,0 +1,48 @@
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/blogcms
+    username: bloguser
+    password: blogpass
+    pool:
+      initial-size: 5
+      max-size: 20
+
+  # Flyway uses JDBC — separate from R2DBC runtime driver
+  flyway:
+    url: jdbc:postgresql://localhost:5432/blogcms
+    user: bloguser
+    password: blogpass
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+
+  webflux:
+    multipart:
+      max-in-memory-size: 1MB
+      max-disk-usage-per-part: 5MB   # hard backstop — keep >= app.upload.max-size-mb below
+
+app:
+  jwt:
+    secret: change-this-to-a-very-long-random-secret-key-at-least-256-bits-long
+    expiration-ms: 86400000   # 24 hours
+  admin:
+    default-email: admin@blog.com
+    default-password: Admin@1234        # only used by /api/auth/emergency-reset
+    reset-secret: ${ADMIN_RESET_SECRET:change-this-emergency-reset-secret}
+  upload:
+    dir: ./uploads
+    max-size-mb: 5
+    allowed-types: image/png,image/jpeg,image/gif,image/webp
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.blog.cms: DEBUG
+    org.springframework.r2dbc: DEBUG

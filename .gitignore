@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Frontend build output
+frontend/.next/
+frontend/out/
+
+# Backend build output
+backend/build/
+backend/.gradle/
+
+# Environment
+frontend/.env.local
+
+# User-uploaded content (runtime data, not source)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

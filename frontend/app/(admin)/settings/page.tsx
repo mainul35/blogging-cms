@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authLib } from '@/lib/auth';
 import { getSiteSettings, updateSiteSettings } from '@/lib/settings';
+import { uploadImage } from '@/lib/upload';
 
 function SiteSettingsForm() {
   const [siteName, setSiteName] = useState('');
@@ -68,6 +69,7 @@ function SiteSettingsForm() {
 }
 
 function ProfileForm() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -75,6 +77,7 @@ function ProfileForm() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -87,6 +90,21 @@ function ProfileForm() {
       .catch(() => setLoadError('Failed to load profile.'))
       .finally(() => setReady(true));
   }, []);
+
+  const handleAvatarSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow picking the same file again later
+    if (!file) return;
+    setError('');
+    setUploading(true);
+    try {
+      setAvatarUrl(await uploadImage(file));
+    } catch {
+      setError('Avatar upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,10 +130,48 @@ function ProfileForm() {
       {error && <p className="mb-4 text-sm text-red-500">{error}</p>}
       {success && <p className="mb-4 text-sm text-green-600">Profile updated successfully.</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        {avatarUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatarUrl} alt="Avatar preview" className="w-16 h-16 rounded-full object-cover border" />
-        )}
+        <div className="flex items-center gap-4">
+          <div className="relative w-16 h-16 shrink-0 rounded-full overflow-hidden bg-gray-100 border">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="Avatar preview" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">No image</div>
+            )}
+            {uploading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-[10px] font-medium text-gray-700">
+                Uploading…
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="px-3 py-1.5 text-xs font-medium border rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {avatarUrl ? 'Change' : 'Upload'} photo
+            </button>
+            {avatarUrl && (
+              <button
+                type="button"
+                onClick={() => setAvatarUrl('')}
+                disabled={uploading}
+                className="px-3 py-1.5 text-xs font-medium border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="hidden"
+            onChange={handleAvatarSelected}
+          />
+        </div>
         <div>
           <label className="block text-sm font-medium mb-1">Email</label>
           <input
@@ -135,18 +191,9 @@ function ProfileForm() {
             className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black"
           />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Avatar URL</label>
-          <input
-            value={avatarUrl}
-            onChange={e => setAvatarUrl(e.target.value)}
-            placeholder="https://example.com/avatar.jpg"
-            className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black"
-          />
-        </div>
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || uploading}
           className="w-full py-2 bg-black text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors"
         >
           {loading ? 'Saving…' : 'Save Profile'}

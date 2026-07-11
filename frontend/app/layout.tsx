@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { cookies } from 'next/headers';
 import { getSiteSettings } from '@/lib/settings';
 import './globals.css';
+import UserMenu from '@/components/UserMenu';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -29,7 +30,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <a href="/blog" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Home</a>
               <a href="/blog" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Blog</a>
               {isAuthenticated ? (
-                <a href="/dashboard" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Dashboard</a>
+                <UserMenu />
               ) : (
                 <a href="/login" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Admin Login</a>
               )}

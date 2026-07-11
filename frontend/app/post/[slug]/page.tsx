@@ -25,46 +25,48 @@ export default async function PostPage({ params }: { params: { slug: string } })
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-12">
-      <Link href="/blog" className="text-sm text-gray-400 hover:underline mb-6 block">
-        ← Back to Blog
-      </Link>
+    <>
+      <main className="max-w-3xl mx-auto px-4 py-12">
+        <Link href="/blog" className="text-sm text-gray-400 hover:underline mb-6 block">
+          ← Back to Blog
+        </Link>
 
-      {post.coverImageUrl && (
-        <img
-          src={post.coverImageUrl}
-          alt={post.title}
-          className="w-full h-64 object-cover rounded-xl mb-8"
-        />
-      )}
+        {post.coverImageUrl && (
+          <img
+            src={post.coverImageUrl}
+            alt={post.title}
+            className="w-full h-64 object-cover rounded-xl mb-8"
+          />
+        )}
 
-      <h1 className="text-4xl font-bold mb-3">{post.title}</h1>
+        <h1 className="text-4xl font-bold mb-3">{post.title}</h1>
 
-      <p className="text-sm text-gray-400 mb-8">
-        {post.publishedAt ? formatDate(post.publishedAt) : formatDate(post.createdAt)}
-        {post.authorName && ` · ${post.authorName}`}
-        {post.categoryName && ` · ${post.categoryName}`}
-      </p>
+        <p className="text-sm text-gray-400 mb-8">
+          {post.publishedAt ? formatDate(post.publishedAt) : formatDate(post.createdAt)}
+          {post.authorName && ` · ${post.authorName}`}
+          {post.categoryName && ` · ${post.categoryName}`}
+        </p>
 
-      <MarkdownRenderer content={post.content} />
+        <MarkdownRenderer content={post.content} />
 
-      {post.tags.length > 0 && (
-        <div className="mt-10 flex flex-wrap gap-2">
-          {post.tags.map(tag => (
-            <span key={tag} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-              {tag}
-            </span>
-          ))}
+        {post.tags.length > 0 && (
+          <div className="mt-10 flex flex-wrap gap-2">
+            {post.tags.map(tag => (
+              <span key={tag} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Comments — client component, fetches its own data */}
+        <CommentSection slug={params.slug} />
+
+        {/* Newsletter subscribe widget */}
+        <div className="mt-12">
+          <NewsletterForm />
         </div>
-      )}
-
-      {/* Comments — client component, fetches its own data */}
-      <CommentSection slug={params.slug} />
-
-      {/* Newsletter subscribe widget */}
-      <div className="mt-12">
-        <NewsletterForm />
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

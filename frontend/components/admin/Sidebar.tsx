@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, FileText, MessageSquare, Mail, Settings as SettingsIcon,
-  Globe, LogOut, PanelLeftClose, PanelLeftOpen,
+  Globe, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
-import { authLib } from '@/lib/auth';
 import { cn } from '@/lib/utils';
+import packageJson from '../../package.json';
 
 const navItems = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
@@ -22,7 +22,6 @@ const COLLAPSED_KEY = 'admin_sidebar_collapsed';
 
 export default function Sidebar({ siteName }: { siteName: string }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -35,11 +34,6 @@ export default function Sidebar({ siteName }: { siteName: string }) {
       localStorage.setItem(COLLAPSED_KEY, String(next));
       return next;
     });
-  };
-
-  const handleLogout = () => {
-    authLib.logout();
-    router.push('/login');
   };
 
   const linkClasses = (active: boolean) => cn(
@@ -95,17 +89,15 @@ export default function Sidebar({ siteName }: { siteName: string }) {
       </nav>
 
       <div className="p-2 border-t">
-        <button
-          onClick={handleLogout}
-          title={collapsed ? 'Sign out' : undefined}
+        <p
+          title={collapsed ? `v${packageJson.version}` : undefined}
           className={cn(
-            'w-full flex items-center gap-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium',
-            collapsed ? 'justify-center px-0' : 'px-3'
+            'text-xs text-gray-400 py-2',
+            collapsed ? 'text-center' : 'px-3'
           )}
         >
-          <LogOut size={18} className="shrink-0" />
-          {!collapsed && <span className="truncate">Sign out</span>}
-        </button>
+          {collapsed ? `v${packageJson.version}` : `Version ${packageJson.version}`}
+        </p>
       </div>
     </aside>
   );

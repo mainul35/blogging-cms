@@ -38,6 +38,9 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/api/posts/*/comments").permitAll()
                         // Newsletter subscribe + confirm are public; admin sub-paths are covered below
                         .pathMatchers("/api/newsletter/subscribe", "/api/newsletter/confirm").permitAll()
+                        // Called server-side by NextAuth after it already verified the OAuth
+                        // identity; gated by a shared secret in the service, not Spring Security.
+                        .pathMatchers(HttpMethod.POST, "/api/readers/oauth-login").permitAll()
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyExchange().authenticated()
                 )

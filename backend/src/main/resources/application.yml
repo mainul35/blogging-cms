@@ -38,6 +38,11 @@ app:
     dir: ./uploads
     max-size-mb: 5
     allowed-types: image/png,image/jpeg,image/gif,image/webp
+  internal:
+    # Shared secret between this backend and the frontend's NextAuth server-side
+    # callback — must be identical in both places, same operational shape as
+    # ADMIN_RESET_SECRET above.
+    auth-secret: ${INTERNAL_AUTH_SECRET:change-this-internal-secret}
 
 server:
   port: 8080

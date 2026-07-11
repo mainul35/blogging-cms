@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  color: #111827;
+  background: #ffffff;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+a {
+  color: #1d4ed8;
+}
+
+/* No global a:hover color rule: `a:hover` (element + pseudo-class) has higher
+   CSS specificity than a single Tailwind utility class like `.text-white`, so
+   it was silently overriding intentional hover text colors on any <Link>-based
+   button or active nav item (e.g. white text on a dark "New Post" button, or
+   white text on an active blue sidebar item, both turning illegible blue-on-
+   same-color on hover). Components that want a hover color change apply their
+   own `hover:text-*` utility, which doesn't have this problem. */

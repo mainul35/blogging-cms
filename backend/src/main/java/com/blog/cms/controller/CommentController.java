@@ -23,21 +23,22 @@ public class CommentController {
         return commentService.getComments(slug);
     }
 
-    // Open to authenticated users and guests (guest requires authorName + authorEmail in body)
+    // Open to admins, signed-in readers, and guests (guest requires authorName +
+    // authorEmail in body). The full Authentication (not just its name) is passed
+    // through, since admin vs reader subjects must be disambiguated by role.
     @PostMapping("/api/posts/{slug}/comments")
     @ResponseStatus(HttpStatus.CREATED)
     public Mono<CommentResponse> addComment(
             @PathVariable String slug,
             @RequestBody @Valid CommentRequest request,
             Authentication auth) {
-        String email = auth != null ? auth.getName() : null;
-        return commentService.addComment(slug, request, email);
+        return commentService.addComment(slug, request, auth);
     }
 
     // Requires authentication; service enforces owner-or-admin rule
     @DeleteMapping("/api/comments/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public Mono<Void> deleteComment(@PathVariable Long id, Authentication auth) {
-        return commentService.deleteComment(id, auth.getName());
+        return commentService.deleteComment(id, auth);
     }
 }

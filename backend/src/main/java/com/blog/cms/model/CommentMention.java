@@ -14,5 +14,6 @@ public class CommentMention {
     @Id
     private Long id;
     private Long commentId;
-    private Long mentionedUserId;
+    private Long mentionedUserId;    // exactly one of these two is set
+    private Long mentionedReaderId;
 }

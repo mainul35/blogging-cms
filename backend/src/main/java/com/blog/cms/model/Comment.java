@@ -16,7 +16,8 @@ public class Comment {
     @Id
     private Long id;
     private Long postId;
-    private Long authorId;       // null for guest comments
+    private Long authorId;       // set only for admin-authored comments
+    private Long readerId;       // set only for OAuth-signed-in reader comments
     private String authorName;
     private String authorEmail;
     private String body;

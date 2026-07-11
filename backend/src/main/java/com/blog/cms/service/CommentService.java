@@ -4,13 +4,17 @@ import com.blog.cms.dto.CommentRequest;
 import com.blog.cms.dto.CommentResponse;
 import com.blog.cms.model.Comment;
 import com.blog.cms.model.CommentMention;
+import com.blog.cms.model.Reader;
 import com.blog.cms.repository.CommentMentionRepository;
 import com.blog.cms.repository.CommentRepository;
 import com.blog.cms.repository.PostRepository;
+import com.blog.cms.repository.ReaderRepository;
 import com.blog.cms.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
@@ -30,6 +34,7 @@ public class CommentService {
     private final CommentMentionRepository commentMentionRepository;
     private final PostRepository postRepository;
     private final UserRepository userRepository;
+    private final ReaderRepository readerRepository;
 
     private static final Pattern MENTION_PATTERN = Pattern.compile("@([a-zA-Z0-9_]+)");
 
@@ -58,10 +63,10 @@ public class CommentService {
                 );
     }
 
-    public Mono<CommentResponse> addComment(String slug, CommentRequest request, String authorEmail) {
+    public Mono<CommentResponse> addComment(String slug, CommentRequest request, Authentication auth) {
         return postRepository.findBySlug(slug)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Post not found")))
-                .flatMap(post -> buildComment(post.getId(), request, authorEmail))
+                .flatMap(post -> buildComment(post.getId(), request, auth))
                 .flatMap(commentRepository::save)
                 .flatMap(saved -> saveMentions(saved).thenReturn(saved))
                 .flatMap(this::toResponse);
@@ -90,33 +95,71 @@ public class CommentService {
                 });
     }
 
-    public Mono<Void> deleteComment(Long id, String requesterEmail) {
+    public Mono<Void> deleteComment(Long id, Authentication auth) {
         return commentRepository.findById(id)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Comment not found")))
-                .flatMap(comment -> userRepository.findByEmail(requesterEmail)
-                        .flatMap(user -> {
-                            boolean isOwner = comment.getAuthorId() != null
-                                    && comment.getAuthorId().equals(user.getId());
-                            boolean isAdmin = "ADMIN".equals(user.getRole());
-                            if (!isOwner && !isAdmin) {
-                                return Mono.<Void>error(new ResponseStatusException(
-                                        HttpStatus.FORBIDDEN, "Not authorized to delete this comment"));
-                            }
-                            return commentRepository.delete(comment);
-                        })
-                );
+                .flatMap(comment -> {
+                    if (hasRole(auth, "ADMIN")) {
+                        return userRepository.findByEmail(auth.getName())
+                                .flatMap(user -> {
+                                    boolean isOwner = comment.getAuthorId() != null
+                                            && comment.getAuthorId().equals(user.getId());
+                                    boolean isAdmin = "ADMIN".equals(user.getRole());
+                                    if (!isOwner && !isAdmin) {
+                                        return Mono.<Void>error(new ResponseStatusException(
+                                                HttpStatus.FORBIDDEN, "Not authorized to delete this comment"));
+                                    }
+                                    return commentRepository.delete(comment);
+                                });
+                    }
+                    if (hasRole(auth, "READER")) {
+                        return readerRepository.findByHandle(auth.getName())
+                                .flatMap(reader -> {
+                                    boolean isOwner = comment.getReaderId() != null
+                                            && comment.getReaderId().equals(reader.getId());
+                                    if (!isOwner) {
+                                        return Mono.<Void>error(new ResponseStatusException(
+                                                HttpStatus.FORBIDDEN, "Not authorized to delete this comment"));
+                                    }
+                                    return commentRepository.delete(comment);
+                                });
+                    }
+                    return Mono.error(new ResponseStatusException(
+                            HttpStatus.FORBIDDEN, "Not authorized to delete this comment"));
+                });
     }
 
     // --- private helpers ---
 
-    private Mono<Comment> buildComment(Long postId, CommentRequest request, String authorEmail) {
-        if (authorEmail != null) {
-            return userRepository.findByEmail(authorEmail)
+    private boolean hasRole(Authentication auth, String role) {
+        if (auth == null) return false;
+        String target = "ROLE_" + role;
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if (target.equals(authority.getAuthority())) return true;
+        }
+        return false;
+    }
+
+    private Mono<Comment> buildComment(Long postId, CommentRequest request, Authentication auth) {
+        if (hasRole(auth, "ADMIN")) {
+            return userRepository.findByEmail(auth.getName())
                     .map(user -> Comment.builder()
                             .postId(postId)
                             .authorId(user.getId())
                             .authorName(user.getUsername() != null ? user.getUsername() : user.getEmail())
                             .authorEmail(user.getEmail())
+                            .body(request.getBody())
+                            .parentId(request.getParentId())
+                            .createdAt(LocalDateTime.now())
+                            .build());
+        }
+        if (hasRole(auth, "READER")) {
+            return readerRepository.findByHandle(auth.getName())
+                    .map(reader -> Comment.builder()
+                            .postId(postId)
+                            .readerId(reader.getId())
+                            .authorName(reader.getDisplayName())
+                            .authorEmail(reader.getEmail())
                             .body(request.getBody())
                             .parentId(request.getParentId())
                             .createdAt(LocalDateTime.now())
@@ -144,35 +187,67 @@ public class CommentService {
 
         if (handles.isEmpty()) return Mono.empty();
 
+        // Readers are the common case now (most @mentions target other
+        // commenters, not the blog owner), so try that lookup first.
         return Flux.fromIterable(handles)
-                .flatMap(handle -> userRepository.findByUsername(handle)
-                        .flatMap(user -> {
-                            log.info("@mention: @{} (userId={}) in comment {}", handle, user.getId(), comment.getId());
-                            return commentMentionRepository.save(
-                                    CommentMention.builder()
-                                            .commentId(comment.getId())
-                                            .mentionedUserId(user.getId())
-                                            .build()
-                            );
-                        })
-                        // If username not found, skip silently
+                .flatMap(handle -> readerRepository.findByHandle(handle)
+                        .map(reader -> CommentMention.builder()
+                                .commentId(comment.getId())
+                                .mentionedReaderId(reader.getId())
+                                .build())
+                        .switchIfEmpty(userRepository.findByUsername(handle)
+                                .map(user -> CommentMention.builder()
+                                        .commentId(comment.getId())
+                                        .mentionedUserId(user.getId())
+                                        .build()))
+                        .flatMap(commentMentionRepository::save)
+                        // If handle resolves to neither a reader nor the admin, skip silently
                         .onErrorResume(e -> Mono.empty())
                 )
                 .then();
     }
 
     private Mono<CommentResponse> toResponse(Comment comment) {
-        return commentMentionRepository.findAllByCommentId(comment.getId())
-                .flatMap(mention -> userRepository.findById(mention.getMentionedUserId())
-                        .map(u -> u.getUsername() != null ? u.getUsername() : u.getEmail()))
-                .collectList()
-                .map(mentions -> CommentResponse.builder()
+        Mono<List<String>> mentionsMono = commentMentionRepository.findAllByCommentId(comment.getId())
+                .flatMap(mention -> mention.getMentionedReaderId() != null
+                        ? readerRepository.findById(mention.getMentionedReaderId()).map(Reader::getHandle)
+                        : userRepository.findById(mention.getMentionedUserId())
+                                .map(u -> u.getUsername() != null ? u.getUsername() : u.getEmail()))
+                .collectList();
+
+        Mono<CommentResponse.CommentResponseBuilder> identityMono = resolveIdentity(comment);
+
+        return Mono.zip(mentionsMono, identityMono)
+                .map(tuple -> tuple.getT2()
                         .id(comment.getId())
                         .body(comment.getBody())
                         .authorName(comment.getAuthorName())
                         .parentId(comment.getParentId())
-                        .mentionedUsernames(mentions)
+                        .mentionedUsernames(tuple.getT1())
                         .createdAt(comment.getCreatedAt())
                         .build());
+    }
+
+    // Resolves the author-identity fields (type/handle/avatar) without changing
+    // the response shape used above — kept as a builder in progress so toResponse
+    // can zip it alongside the mentions lookup.
+    private Mono<CommentResponse.CommentResponseBuilder> resolveIdentity(Comment comment) {
+        if (comment.getAuthorId() != null) {
+            return userRepository.findById(comment.getAuthorId())
+                    .map(user -> CommentResponse.builder()
+                            .authorType("ADMIN")
+                            .authorHandle(user.getUsername())
+                            .authorAvatarUrl(user.getAvatarUrl()))
+                    .defaultIfEmpty(CommentResponse.builder().authorType("ADMIN"));
+        }
+        if (comment.getReaderId() != null) {
+            return readerRepository.findById(comment.getReaderId())
+                    .map(reader -> CommentResponse.builder()
+                            .authorType("READER")
+                            .authorHandle(reader.getHandle())
+                            .authorAvatarUrl(reader.getAvatarUrl()))
+                    .defaultIfEmpty(CommentResponse.builder().authorType("READER"));
+        }
+        return Mono.just(CommentResponse.builder().authorType("GUEST"));
     }
 }

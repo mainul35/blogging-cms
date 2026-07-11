@@ -15,8 +15,11 @@ public class CommentResponse {
     private Long id;
     private String body;
     private String authorName;
+    private String authorType;       // "ADMIN" | "READER" | "GUEST"
+    private String authorHandle;     // reader handle or admin username; null for guests
+    private String authorAvatarUrl;
     private Long parentId;
-    private List<String> mentionedUsernames;
+    private List<String> mentionedUsernames;   // admin usernames and reader handles, uniformly
     private LocalDateTime createdAt;
 
     // Populated by the admin endpoint only

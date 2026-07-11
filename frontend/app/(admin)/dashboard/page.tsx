@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { api } from '@/lib/api';
 import Link from 'next/link';
 
@@ -10,7 +11,14 @@ interface Stats {
 export default async function DashboardPage() {
   let stats: Stats = { totalPosts: 0, publishedPosts: 0, draftPosts: 0 };
   try {
-    stats = await api.get<Stats>('/api/admin/stats');
+    // This runs server-side, where lib/api.ts's localStorage-based token lookup
+    // can't find anything (localStorage doesn't exist outside the browser) —
+    // /api/admin/stats requires auth, so that always silently fell back to
+    // zeros. Forward the same JWT from the auth cookie instead.
+    const token = (await cookies()).get('token')?.value;
+    stats = await api.get<Stats>('/api/admin/stats', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
   } catch {}
 
   return (

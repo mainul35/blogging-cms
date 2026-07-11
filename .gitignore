@@ -4,6 +4,8 @@ node_modules/
 # Frontend build output
 frontend/.next/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
+frontend/dev.log
 
 # Backend build output
 backend/build/

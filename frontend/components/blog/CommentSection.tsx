@@ -4,19 +4,42 @@ import { useState, useEffect, useCallback } from 'react';
 import { CommentResponse } from '@/types/comment';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
-import CommentForm from './CommentForm';
+import CommentForm, { MentionCandidate } from './CommentForm';
+import NewsletterOfferBanner from './NewsletterOfferBanner';
 
-// Highlight @mentions in comment body as blue spans
-function renderBody(body: string): React.ReactNode {
-  return body.split(/(@[a-zA-Z0-9_]+)/g).map((part, i) =>
-    /^@[a-zA-Z0-9_]+$/.test(part)
-      ? <span key={i} className="text-blue-600 font-medium">{part}</span>
-      : <span key={i}>{part}</span>
-  );
+// Highlight @mentions in comment body — resolved mentions (present in this
+// comment's mentionedUsernames, i.e. the handle actually exists) get a
+// stronger style than an unresolved @word (typo, or the mentioned handle
+// doesn't exist), which keeps today's plain decorative highlighting.
+function renderBody(body: string, mentionedUsernames: string[]): React.ReactNode {
+  return body.split(/(@[a-zA-Z0-9_]+)/g).map((part, i) => {
+    if (!/^@[a-zA-Z0-9_]+$/.test(part)) return <span key={i}>{part}</span>;
+    const resolved = mentionedUsernames.includes(part.slice(1));
+    return (
+      <span
+        key={i}
+        className={resolved ? 'text-blue-700 font-medium bg-blue-50 rounded px-0.5' : 'text-blue-600 font-medium'}
+      >
+        {part}
+      </span>
+    );
+  });
 }
 
 function countAll(comments: CommentResponse[]): number {
   return comments.reduce((acc, c) => acc + 1 + countAll(c.replies), 0);
+}
+
+// Scoped to this post only — the people who've already commented here, so
+// mention-autocomplete can suggest them without needing a site-wide directory.
+function collectMentionCandidates(comments: CommentResponse[], acc: Map<string, MentionCandidate> = new Map()): Map<string, MentionCandidate> {
+  for (const c of comments) {
+    if (c.authorHandle) {
+      acc.set(c.authorHandle, { handle: c.authorHandle, displayName: c.authorName });
+    }
+    collectMentionCandidates(c.replies, acc);
+  }
+  return acc;
 }
 
 // ---
@@ -25,19 +48,29 @@ interface CommentItemProps {
   comment: CommentResponse;
   slug: string;
   onRefresh: () => void;
+  mentionCandidates: MentionCandidate[];
   depth?: number;
 }
 
-function CommentItem({ comment, slug, onRefresh, depth = 0 }: CommentItemProps) {
+function CommentItem({ comment, slug, onRefresh, mentionCandidates, depth = 0 }: CommentItemProps) {
   const [replying, setReplying] = useState(false);
 
   return (
     <div>
       <div className="flex gap-3">
-        {/* Avatar initial */}
-        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0 text-sm font-semibold text-gray-600 select-none">
-          {comment.authorName[0].toUpperCase()}
-        </div>
+        {/* Avatar — real photo when available, else the initial letter */}
+        {comment.authorAvatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={comment.authorAvatarUrl}
+            alt=""
+            className="w-8 h-8 rounded-full object-cover shrink-0"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0 text-sm font-semibold text-gray-600 select-none">
+            {comment.authorName[0].toUpperCase()}
+          </div>
+        )}
 
         <div className="flex-1 min-w-0">
           {/* Header */}
@@ -48,7 +81,7 @@ function CommentItem({ comment, slug, onRefresh, depth = 0 }: CommentItemProps) 
 
           {/* Body with @mention highlighting */}
           <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-            {renderBody(comment.body)}
+            {renderBody(comment.body, comment.mentionedUsernames)}
           </p>
 
           {/* Reply trigger — cap nesting at depth 3 to keep layout tidy */}
@@ -68,6 +101,7 @@ function CommentItem({ comment, slug, onRefresh, depth = 0 }: CommentItemProps) 
                 parentId={comment.id}
                 onSuccess={() => { setReplying(false); onRefresh(); }}
                 onCancel={() => setReplying(false)}
+                mentionCandidates={mentionCandidates}
               />
             </div>
           )}
@@ -83,6 +117,7 @@ function CommentItem({ comment, slug, onRefresh, depth = 0 }: CommentItemProps) 
               comment={reply}
               slug={slug}
               onRefresh={onRefresh}
+              mentionCandidates={mentionCandidates}
               depth={depth + 1}
             />
           ))}
@@ -114,6 +149,7 @@ export default function CommentSection({ slug }: { slug: string }) {
   useEffect(() => { fetchComments(); }, [fetchComments]);
 
   const total = countAll(comments);
+  const mentionCandidates = Array.from(collectMentionCandidates(comments).values());
 
   return (
     <section className="mt-16 pt-10 border-t border-gray-100">
@@ -121,10 +157,12 @@ export default function CommentSection({ slug }: { slug: string }) {
         {loading ? 'Comments' : total > 0 ? `${total} Comment${total !== 1 ? 's' : ''}` : 'Comments'}
       </h2>
 
+      <NewsletterOfferBanner />
+
       {/* Top-level comment form */}
       <div className="bg-gray-50 rounded-xl p-5 mb-8">
         <p className="text-sm font-medium text-gray-700 mb-3">Leave a comment</p>
-        <CommentForm slug={slug} onSuccess={fetchComments} />
+        <CommentForm slug={slug} onSuccess={fetchComments} mentionCandidates={mentionCandidates} />
       </div>
 
       {/* Comment list */}
@@ -150,6 +188,7 @@ export default function CommentSection({ slug }: { slug: string }) {
               comment={comment}
               slug={slug}
               onRefresh={fetchComments}
+              mentionCandidates={mentionCandidates}
             />
           ))}
         </div>

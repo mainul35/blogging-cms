@@ -2,6 +2,9 @@ export interface CommentResponse {
   id: number;
   body: string;
   authorName: string;
+  authorType?: 'ADMIN' | 'READER' | 'GUEST';
+  authorHandle?: string | null;
+  authorAvatarUrl?: string | null;
   parentId: number | null;
   mentionedUsernames: string[];
   createdAt: string;

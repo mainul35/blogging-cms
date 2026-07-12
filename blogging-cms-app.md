@@ -23,10 +23,10 @@ blogging-cms-app/
 ├── backend/      Spring Boot 3 WebFlux (port 8080)
 ├── frontend/     Next.js 14 App Router  (port 3000)
 ├── plan.md       Original plan + deviations + full changelog
-└── docker-compose.yml   PostgreSQL 16 + Redis 7
+└── docker-compose.yml   PostgreSQL 16 + Redis 7 + Mailpit (local email sandbox, opt-in)
 ```
 
-Not a git repository (checked — no `.git` anywhere in the tree).
+Git repo, pushed to `https://github.com/mainul35/blogging-cms.git` on branch `development/blogging-cms-v2` (the repo's `main` and other branches hold an unrelated older project — deliberately left untouched, see repo history for why this branch exists).
 
 ## Technology Stack
 
@@ -50,12 +50,13 @@ Not a git repository (checked — no `.git` anywhere in the tree).
 | Sub-package | Contents |
 |---|---|
 | `config/` | SecurityConfig, R2dbcConfig, RedisConfig, WebConfig (serves `/uploads/**`), GlobalExceptionHandler (clean 413 for oversized uploads) |
-| `controller/` | AuthController, AdminController, PostController, CategoryController, TagController, CommentController, NewsletterController, UploadController |
-| `service/` | AuthService, PostService, CategoryService, CacheService, CommentService, NewsletterService, UploadService |
-| `repository/` | UserRepository, PostRepository, CategoryRepository, TagRepository, CommentRepository, CommentMentionRepository, NewsletterRepository |
-| `model/` | User (has `username` reused as display name + `avatarUrl`), Post, Category, Tag, Comment, CommentMention, NewsletterSubscriber |
-| `dto/` | AuthRequest, AuthResponse (now incl. `name`/`avatarUrl`), ChangePasswordRequest, ProfileResponse, UpdateProfileRequest, PostRequest, PostResponse, CommentRequest, CommentResponse, NewsletterSubscribeRequest |
-| `security/` | JwtUtil, JwtAuthFilter (WebFilter) |
+| `controller/` | AuthController, AdminController, PostController, CategoryController, TagController, CommentController, NewsletterController, UploadController, ReaderController |
+| `service/` | AuthService, PostService, CategoryService, CacheService, CommentService, NewsletterService, UploadService, ReaderService |
+| `repository/` | UserRepository, PostRepository, CategoryRepository, TagRepository, CommentRepository, CommentMentionRepository, NewsletterRepository, ReaderRepository, ReaderOAuthIdentityRepository |
+| `model/` | User (has `username` reused as display name + `avatarUrl`), Post, Category, Tag, Comment (+`readerId`), CommentMention (+`mentionedReaderId`), NewsletterSubscriber, Reader, ReaderOAuthIdentity |
+| `dto/` | AuthRequest, AuthResponse (now incl. `name`/`avatarUrl`), ChangePasswordRequest, ProfileResponse, UpdateProfileRequest, PostRequest, PostResponse, CommentRequest, CommentResponse (+`authorType`/`authorHandle`/`authorAvatarUrl`), NewsletterSubscribeRequest, OAuthLoginRequest, ReaderAuthResponse |
+| `security/` | JwtUtil, JwtAuthFilter (WebFilter) — also validates reader JWTs (`role: READER`), same secret, no changes needed |
+| `mail/` | `MailSender` interface + `MailMessage` DTO; `LogMailSender` (default), `SmtpMailSender`, `ResendMailSender`, `SendGridMailSender` — selected via `app.mail.provider`, see Newsletter/Mail section below |
 
 ## Database Migrations (Flyway)
 
@@ -80,6 +81,8 @@ GET /api/posts/**, /api/categories/**, /api/tags/**    → permitAll
 GET /uploads/**                                        → permitAll (public post images)
 POST /api/posts/*/comments                             → permitAll  (guest commenting)
 /api/newsletter/subscribe, /newsletter/confirm         → permitAll
+POST /api/readers/oauth-login                          → permitAll (real gate is the internal-secret header check
+                                                          inside ReaderService, not Spring Security)
 /api/admin/**                                          → hasRole("ADMIN")  (incl. account/profile, account/password, uploads)
 anyExchange                                            → authenticated
 ```
@@ -109,12 +112,16 @@ GET  /api/posts/{slug}/comments         → Flux<CommentResponse> (threaded tree
 POST /api/posts/{slug}/comments         → Mono<CommentResponse> (guest or auth)
 DELETE /api/comments/{id}               → 204 (owner or ADMIN)
 
-POST /api/newsletter/subscribe          → String (confirmation stub logged)
+POST /api/newsletter/subscribe          → String (sends a real confirmation email via MailSender — see below)
 GET  /api/newsletter/confirm?token=     → String
 GET  /api/admin/comments                → Flux<CommentResponse> (flat, newest first, with postTitle/postSlug)
 GET  /api/admin/stats                   → { totalPosts, publishedPosts, draftPosts }
 GET  /api/admin/newsletter/subscribers  → Flux<NewsletterSubscriber>
-POST /api/admin/newsletter/send?postId= → String (digest stub logged)
+POST /api/admin/newsletter/send?postId= → String (sends a real digest email to every confirmed subscriber)
+
+POST /api/readers/oauth-login           → ReaderAuthResponse (internal only — server-to-server from the
+                                           frontend's NextAuth callback, gated by X-Internal-Auth-Secret,
+                                           not by Spring Security; see Reader OAuth section below)
 ```
 
 ## Frontend Structure
@@ -177,7 +184,7 @@ types/
 - **CommentSection** is a `'use client'` component so it fetches its own data after hydration — the parent post page stays a server component.
 - **@mention highlighting** in `CommentSection`: client-side regex split on `@[a-zA-Z0-9_]+`, rendered as `<span className="text-blue-600">`.
 - **Redis eviction:** PostService evicts a post's Redis key on `updatePost` and `deletePost` via `CacheService.evictPost(slug)`.
-- **Newsletter emails:** stubbed as `log.info` — replace with Spring Mail / SendGrid in `NewsletterService`.
+- **Newsletter emails:** real, sent through the pluggable `MailSender` abstraction — see "Reader OAuth & Mail Delivery" below.
 - **Editor images**: uploaded/pasted images are inserted as `<img src id>` (not `![]()`) so `ResizableImage` can target them precisely for resize commits. Resizing writes `width`/`height`/`id` back into the raw markdown. `rehype-sanitize` prefixes all `id` attributes with `user-content-` (DOM-clobbering protection) — strip that prefix before matching against the raw source.
 - **Editor text style / alignment**: toolbar has a "Style" dropdown (Paragraph, Heading 1-6 — replaces any existing heading prefix rather than stacking) and an "Align" dropdown (Left/Center/Right/Justify — wraps the block in `<div align="...">`, restricted to those 4 literal values in the sanitize schema, not an open `style` attribute). Nested markdown formatting inside an aligned block still works correctly (verified). These two use a captured-selection-on-mousedown pattern instead of the toolbar buttons' `onMouseDown preventDefault` trick, since preventing default on a `<select>` would block it from opening. No font-family/size controls — markdown has no such syntax; flagged to the user rather than guessed at.
 - **Orphaned image cleanup** happens in `PostService` (backend), not the frontend — see API section above.
@@ -185,6 +192,12 @@ types/
   - Root layout (`app/layout.tsx`): `body` is `h-screen flex flex-col overflow-hidden`; `<header>` is `shrink-0` (fixed, never scrolls away); `{children}` is wrapped in `flex-1 min-h-0 overflow-y-auto` (the scroll region for ordinary pages).
   - Admin layout (`app/(admin)/layout.tsx`): `h-full` (fills exactly what the root wrapper gives it), `Sidebar` stays visually pinned, only `main` (`flex-1 min-w-0 min-h-0 overflow-y-auto`) scrolls.
   - `min-h-0`/`min-w-0` on the flex children are load-bearing — without them the flex item won't actually shrink to the bounded size, and `overflow-y-auto`/`overflow-x` won't kick in (content just overflows the parent instead). This tripped up two earlier iterations of this layout — see plan.md's Post-Launch Changes for the failure history if this area breaks again.
+
+## Reader OAuth & Mail Delivery
+
+**Reader identity (Google/GitHub sign-in for comments/mentions/newsletter):** entirely separate from admin auth. NextAuth v4 handles the OAuth dance on the frontend, mounted at `/api/reader-auth/[...nextauth]` — **not** the default `/api/auth/[...nextauth]`, which would collide with the existing admin `/api/auth/login`/`emergency-reset` routes (no Next.js route exists there today; they only work via `next.config.js`'s rewrite proxy, which the plain-array `rewrites()` form checks *before* dynamic catch-all routes — this exact collision broke reader sign-in once already, fixed by moving the backend-proxy rewrite into the `fallback` bucket). On first sign-in, NextAuth's `jwt` callback calls the backend's `POST /api/readers/oauth-login` (secret-gated, not Spring-Security-gated) to upsert a `readers` row and mint a reader-scoped JWT (`role: READER`, subject = reader's slugified+deduped `handle`, not email — a reader can have two rows if they sign in via Google and GitHub with the same email, deliberately not merged). That JWT flows through the *same* `JwtAuthFilter`/`JwtUtil` as admin tokens, no filter-chain changes. Guest commenting (no login) still works unchanged.
+
+**Mail delivery:** see the `mail/` package above. Default is `log` (just logs, nothing sent — zero config). To send real email, set `app.mail.provider` to `smtp`/`resend`/`sendgrid` plus that provider's config block in `application.yml`. For local testing without a real provider account, `docker-compose.yml` includes an opt-in `mailpit` service (`docker compose up -d mailpit`, SMTP on `1025`, web UI on `http://localhost:8025`) — point `app.mail.provider=smtp` at `MAIL_SMTP_HOST=localhost MAIL_SMTP_PORT=1025 MAIL_SMTP_AUTH=false MAIL_SMTP_STARTTLS=false` and every confirmation/digest email shows up in the Mailpit UI instead of a real inbox.
 
 ## Known Pre-Existing Bugs Fixed (worth knowing if something looks newly broken)
 

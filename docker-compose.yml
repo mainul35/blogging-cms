@@ -31,6 +31,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local email sandbox — catches every message sent by the backend instead of
+  # delivering it, with a web UI to inspect them. Point the backend at it with:
+  #   app.mail.provider=smtp (or MAIL_* env vars — see backend/src/main/resources/application.yml)
+  #   MAIL_SMTP_HOST=localhost, MAIL_SMTP_PORT=1025, MAIL_SMTP_AUTH=false, MAIL_SMTP_STARTTLS=false
+  # Then open http://localhost:8025 to see confirmation/digest emails as they're sent.
+  # Not used by default (app.mail.provider defaults to "log") — this is opt-in for
+  # anyone who wants to see real emails render without a real provider account.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: blog_mailpit
+    ports:
+      - '1025:1025'   # SMTP
+      - '8025:8025'   # Web UI
+
 volumes:
   postgres_data:
   redis_data:

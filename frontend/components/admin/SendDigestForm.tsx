@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Post } from '@/types/post';
 import { api } from '@/lib/api';
 
@@ -9,14 +9,20 @@ type Status = 'idle' | 'loadingPosts' | 'sending' | 'success' | 'error';
 export default function SendDigestForm() {
   const [posts, setPosts]       = useState<Post[]>([]);
   const [postId, setPostId]     = useState<string>('');
+  const [query, setQuery]       = useState('');
+  const [isOpen, setIsOpen]     = useState(false);
   const [status, setStatus]     = useState<Status>('loadingPosts');
   const [message, setMessage]   = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.get<Post[]>('/api/posts?status=PUBLISHED')
       .then(data => {
         setPosts(data);
-        if (data.length > 0) setPostId(String(data[0].id));
+        if (data.length > 0) {
+          setPostId(String(data[0].id));
+          setQuery(data[0].title);
+        }
         setStatus('idle');
       })
       .catch(() => {
@@ -24,6 +30,31 @@ export default function SendDigestForm() {
         setStatus('error');
       });
   }, []);
+
+  // Close the dropdown on an outside click, reverting the typed text back to
+  // whatever's actually selected if they clicked away without picking anything.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+        const selected = posts.find(p => String(p.id) === postId);
+        setQuery(selected ? selected.title : '');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen, posts, postId]);
+
+  const filteredPosts = query.trim() === ''
+    ? posts
+    : posts.filter(p => p.title.toLowerCase().includes(query.toLowerCase()));
+
+  const selectPost = (post: Post) => {
+    setPostId(String(post.id));
+    setQuery(post.title);
+    setIsOpen(false);
+  };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +117,7 @@ export default function SendDigestForm() {
         {/* Form */}
         {status !== 'success' && (
           <form onSubmit={handleSend} className="space-y-4">
-            <div>
+            <div ref={containerRef} className="relative">
               <label className="block text-xs font-medium text-gray-600 mb-1.5">
                 Post to feature
               </label>
@@ -97,17 +128,37 @@ export default function SendDigestForm() {
                   No published posts available.
                 </p>
               ) : (
-                <select
-                  value={postId}
-                  onChange={e => setPostId(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                >
-                  {posts.map(post => (
-                    <option key={post.id} value={post.id}>
-                      {post.title}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <input
+                    value={query}
+                    onChange={e => { setQuery(e.target.value); setIsOpen(true); }}
+                    onFocus={() => { setIsOpen(true); setQuery(''); }}
+                    placeholder="Search posts by title…"
+                    autoComplete="off"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  />
+                  {isOpen && (
+                    <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border rounded-lg shadow-lg">
+                      {filteredPosts.length === 0 ? (
+                        <p className="px-3 py-2 text-sm text-gray-400">No matching posts.</p>
+                      ) : (
+                        filteredPosts.map(post => (
+                          <button
+                            key={post.id}
+                            type="button"
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => selectPost(post)}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 transition-colors ${
+                              String(post.id) === postId ? 'bg-gray-50 font-medium' : ''
+                            }`}
+                          >
+                            {post.title}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

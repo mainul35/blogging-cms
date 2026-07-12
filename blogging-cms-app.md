@@ -199,6 +199,47 @@ types/
 
 **Mail delivery:** see the `mail/` package above. Default is `log` (just logs, nothing sent — zero config). To send real email, set `app.mail.provider` to `smtp`/`resend`/`sendgrid` plus that provider's config block in `application.yml`. For local testing without a real provider account, `docker-compose.yml` includes an opt-in `mailpit` service (`docker compose up -d mailpit`, SMTP on `1025`, web UI on `http://localhost:8025`) — point `app.mail.provider=smtp` at `MAIL_SMTP_HOST=localhost MAIL_SMTP_PORT=1025 MAIL_SMTP_AUTH=false MAIL_SMTP_STARTTLS=false` and every confirmation/digest email shows up in the Mailpit UI instead of a real inbox.
 
+### Setup guide — Google/GitHub sign-in
+
+1. **Google:** [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials → *Create Credentials* → OAuth client ID → Application type "Web application". Authorized redirect URI: `http://localhost:3000/api/reader-auth/callback/google` (swap the origin for your real domain in production — note the path is `/api/reader-auth/...`, **not** the NextAuth default `/api/auth/...`). Copy the Client ID/Secret into `frontend/.env.local`:
+   ```
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   ```
+2. **GitHub:** GitHub → Settings → Developer settings → OAuth Apps → *New OAuth App*. Homepage URL `http://localhost:3000`, Authorization callback URL `http://localhost:3000/api/reader-auth/callback/github` (same path caveat as above). Generate a client secret, put both into `.env.local`:
+   ```
+   GITHUB_CLIENT_ID=...
+   GITHUB_CLIENT_SECRET=...
+   ```
+3. Also required in `.env.local` regardless of provider: `NEXTAUTH_SECRET` (generate with `openssl rand -base64 32`), `NEXTAUTH_URL=http://localhost:3000`, and `INTERNAL_AUTH_SECRET` — must be the *literal same value* as the backend's `app.internal.auth-secret` / `INTERNAL_AUTH_SECRET` env var, or every reader sign-in 403s at the bridge call with no visible error beyond a generic sign-in failure.
+4. Sign-in buttons already exist in `CommentForm.tsx` ("Continue with Google"/"Continue with GitHub") — nothing else to wire up once the four env vars above are set. Guest commenting keeps working with zero config either way.
+
+### Setup guide — mail providers
+
+Set `app.mail.provider` (or `MAIL_PROVIDER` if you prefer overriding via env — the yml key doesn't currently read from one, so edit `application.yml` directly or pass `--app.mail.provider=...` as a run arg) to one of:
+
+- **`log`** (default) — nothing to configure. Emails are logged, not sent.
+- **`smtp`** — works with Gmail, any self-hosted server, and AWS SES/Mailgun/Postmark via their SMTP relay credentials:
+  ```
+  MAIL_SMTP_HOST=smtp.gmail.com        # or your provider's SMTP host
+  MAIL_SMTP_PORT=587
+  MAIL_SMTP_USERNAME=you@gmail.com
+  MAIL_SMTP_PASSWORD=<an App Password, not your real Gmail password>
+  MAIL_SMTP_AUTH=true
+  MAIL_SMTP_STARTTLS=true
+  ```
+  Gmail specifically requires an [App Password](https://myaccount.google.com/apppasswords) (2FA must be on) — a normal account password will be rejected.
+- **`resend`** — sign up at resend.com, verify a sending domain (or use their shared test domain for dev), create an API key:
+  ```
+  RESEND_API_KEY=re_...
+  ```
+- **`sendgrid`** — sign up, verify a sender identity, create a full-access (or Mail Send scoped) API key:
+  ```
+  SENDGRID_API_KEY=SG...
+  ```
+- All providers also read `app.mail.from` (the sender address) and optionally `MAIL_REPLY_TO`.
+- **Local sandbox, no account needed:** `docker compose up -d mailpit`, then `provider=smtp` with `MAIL_SMTP_HOST=localhost MAIL_SMTP_PORT=1025 MAIL_SMTP_AUTH=false MAIL_SMTP_STARTTLS=false` — every email shows up at `http://localhost:8025` instead of anyone's real inbox. This is what was used to verify the SMTP path end-to-end (see plan.md's Post-Launch Changes).
+
 ## Known Pre-Existing Bugs Fixed (worth knowing if something looks newly broken)
 
 These were latent since the original build, found incidentally while working on unrelated features:

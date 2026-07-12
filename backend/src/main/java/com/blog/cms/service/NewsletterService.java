@@ -1,10 +1,13 @@
 package com.blog.cms.service;
 
+import com.blog.cms.mail.MailMessage;
+import com.blog.cms.mail.MailSender;
 import com.blog.cms.model.NewsletterSubscriber;
 import com.blog.cms.repository.NewsletterRepository;
 import com.blog.cms.repository.PostRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -21,6 +24,13 @@ public class NewsletterService {
 
     private final NewsletterRepository newsletterRepository;
     private final PostRepository postRepository;
+    private final MailSender mailSender;
+
+    @Value("${app.public-url}")
+    private String publicUrl;
+
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
 
     public Mono<String> subscribe(String email) {
         return newsletterRepository.existsByEmail(email)
@@ -37,10 +47,8 @@ public class NewsletterService {
                                     .token(token)
                                     .subscribedAt(LocalDateTime.now())
                                     .build()
-                    ).doOnSuccess(s ->
-                            // Stub: replace with actual mail sender (e.g. Spring Mail / SendGrid)
-                            log.info("[EMAIL] Confirmation link → {} | token: {}", email, token)
-                    ).thenReturn("Check your inbox to confirm your subscription.");
+                    ).flatMap(saved -> sendConfirmationEmail(email, token))
+                     .thenReturn("Check your inbox to confirm your subscription.");
                 });
     }
 
@@ -67,14 +75,37 @@ public class NewsletterService {
         return postRepository.findById(postId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Post not found")))
-                .flatMap(post ->
-                        newsletterRepository.findAllByConfirmed(true)
-                                .doOnNext(sub ->
-                                        // Stub: replace with actual email dispatch
-                                        log.info("[EMAIL] Digest → {} | \"{}\"", sub.getEmail(), post.getTitle())
-                                )
-                                .count()
-                                .map(count -> "Digest queued for " + count + " subscriber(s) — post: \"" + post.getTitle() + "\"")
-                );
+                .flatMap(post -> {
+                    String link = frontendUrl + "/post/" + post.getSlug();
+                    return newsletterRepository.findAllByConfirmed(true)
+                            .flatMap(sub -> sendDigestEmail(sub.getEmail(), post.getTitle(), link).thenReturn(sub))
+                            .count()
+                            .map(count -> "Digest queued for " + count + " subscriber(s) — post: \"" + post.getTitle() + "\"");
+                });
+    }
+
+    private Mono<Void> sendConfirmationEmail(String email, String token) {
+        String link = publicUrl + "/api/newsletter/confirm?token=" + token;
+        return mailSender.send(MailMessage.builder()
+                        .to(email)
+                        .subject("Confirm your subscription")
+                        .text("Click to confirm your subscription: " + link)
+                        .build())
+                .onErrorResume(e -> {
+                    log.warn("Failed to send confirmation email to {}: {}", email, e.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> sendDigestEmail(String email, String title, String link) {
+        return mailSender.send(MailMessage.builder()
+                        .to(email)
+                        .subject("New post: " + title)
+                        .text("\"" + title + "\" was just published.\nRead it here: " + link)
+                        .build())
+                .onErrorResume(e -> {
+                    log.warn("Failed to send digest email to {}: {}", email, e.getMessage());
+                    return Mono.empty();
+                });
     }
 }

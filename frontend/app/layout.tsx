@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { getSiteSettings } from '@/lib/settings';
 import './globals.css';
 import UserMenu from '@/components/UserMenu';
+import ReaderSessionProvider from '@/components/ReaderSessionProvider';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -41,7 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             of growing with its content — that's what makes overflow-y-auto work here
             rather than pushing the body taller than the viewport. */}
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {children}
+          <ReaderSessionProvider>{children}</ReaderSessionProvider>
         </div>
       </body>
     </html>

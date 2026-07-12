@@ -23,6 +23,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T;
+
+  // Some endpoints (e.g. newsletter subscribe/confirm/send) return a plain
+  // text message rather than JSON — calling res.json() on those throws a
+  // confusing "Unexpected token" error instead of the actual response.
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return res.text() as unknown as T;
+  }
   return res.json();
 }
 

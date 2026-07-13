@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { authLib } from '@/lib/auth';
 
@@ -11,7 +11,6 @@ export default function UserMenu() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
-  const router = useRouter();
 
   useEffect(() => {
     authLib.getProfile()
@@ -40,7 +39,11 @@ export default function UserMenu() {
 
   const handleLogout = () => {
     authLib.logout();
-    router.push('/login');
+    // Full navigation, not router.push() -- the header's isAuthenticated
+    // check runs server-side off the auth cookie, and Next's Router Cache
+    // keeps serving the shared layout's old (signed-in) render across a soft
+    // client-side navigation even after router.refresh(). See login page.
+    window.location.href = '/login';
   };
 
   const menuItems = [

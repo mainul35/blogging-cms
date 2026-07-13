@@ -1,13 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
 import { authLib } from '@/lib/auth';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -20,7 +18,13 @@ export default function LoginPage() {
     setError('');
     try {
       await authLib.login({ email, password });
-      router.push('/dashboard');
+      // Root layout's header reads the auth cookie in a Server Component.
+      // router.push() (even combined with router.refresh()) reuses Next's
+      // cached render of that shared layout, so the header wouldn't show the
+      // signed-in state until a manual reload -- confirmed router.refresh()
+      // doesn't reliably invalidate a layout shared across the old/new route
+      // in this Next.js version. A full navigation sidesteps that entirely.
+      window.location.href = '/dashboard';
     } catch {
       setError('Invalid email or password.');
     } finally {

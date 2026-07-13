@@ -13,14 +13,19 @@ import com.blog.cms.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.UUID;
 
 @Service
@@ -31,11 +36,14 @@ public class AuthService {
     private static final Duration RESET_TOKEN_TTL = Duration.ofHours(1);
     private static final String GENERIC_FORGOT_PASSWORD_MESSAGE =
             "If that email is registered, a password reset link has been sent.";
+    private static final int FORGOT_PASSWORD_MAX_REQUESTS = 5;
+    private static final Duration FORGOT_PASSWORD_RATE_WINDOW = Duration.ofMinutes(15);
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final MailSender mailSender;
+    private final ReactiveRedisTemplate<String, Object> redisTemplate;
 
     @Value("${app.admin.default-email}")
     private String defaultAdminEmail;
@@ -117,19 +125,45 @@ public class AuthService {
     // an emergency nuke-to-defaults escape hatch; this one is the normal
     // self-service path a real user would use day to day).
     public Mono<String> forgotPassword(String email) {
-        return userRepository.findByEmail(email)
-                .flatMap(user -> {
-                    String token = UUID.randomUUID().toString();
-                    user.setResetToken(token);
-                    user.setResetTokenExpiresAt(LocalDateTime.now().plus(RESET_TOKEN_TTL));
-                    return userRepository.save(user)
-                            .flatMap(saved -> sendResetEmail(saved.getEmail(), token));
-                })
+        // Checked before the DB lookup, and never surfaced to the caller either
+        // way (still the same generic message) — an attacker spamming this
+        // endpoint shouldn't be able to tell "rate limited" apart from "email
+        // doesn't exist" apart from "email exists, link sent".
+        return isWithinRateLimit(email)
+                .flatMap(allowed -> allowed
+                        ? userRepository.findByEmail(email)
+                                .flatMap(user -> {
+                                    String rawToken = UUID.randomUUID().toString();
+                                    // Store only the hash — if the database were ever read
+                                    // by someone who shouldn't (a leak, a misconfigured
+                                    // backup, an over-privileged query), a stored hash can't
+                                    // be replayed as a reset link the way the raw token
+                                    // could. Same idea as never storing plaintext passwords.
+                                    user.setResetToken(hashToken(rawToken));
+                                    user.setResetTokenExpiresAt(LocalDateTime.now().plus(RESET_TOKEN_TTL));
+                                    return userRepository.save(user)
+                                            .flatMap(saved -> sendResetEmail(saved.getEmail(), rawToken));
+                                })
+                        : Mono.empty())
                 .thenReturn(GENERIC_FORGOT_PASSWORD_MESSAGE);
     }
 
+    private Mono<Boolean> isWithinRateLimit(String email) {
+        String key = "forgot-password-rate:" + email.toLowerCase();
+        return redisTemplate.opsForValue().increment(key)
+                .flatMap(count -> count == 1
+                        ? redisTemplate.expire(key, FORGOT_PASSWORD_RATE_WINDOW).thenReturn(true)
+                        : Mono.just(count <= FORGOT_PASSWORD_MAX_REQUESTS))
+                // If Redis is unreachable, fail open rather than blocking a
+                // legitimate password reset over an infra hiccup.
+                .onErrorResume(e -> {
+                    log.warn("Rate-limit check failed for forgot-password, allowing request: {}", e.getMessage());
+                    return Mono.just(true);
+                });
+    }
+
     public Mono<Void> resetPassword(String token, String newPassword) {
-        return userRepository.findByResetToken(token)
+        return userRepository.findByResetToken(hashToken(token))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.BAD_REQUEST, "Invalid or expired reset link")))
                 .flatMap(user -> {
@@ -144,6 +178,17 @@ public class AuthService {
                     return userRepository.save(user);
                 })
                 .then();
+    }
+
+    private String hashToken(String rawToken) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is guaranteed present on every JVM; this can't actually happen.
+            throw new IllegalStateException(e);
+        }
     }
 
     private Mono<Void> sendResetEmail(String email, String token) {

@@ -1,5 +1,19 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  async headers() {
+    return [
+      {
+        // The reset token lives in this page's URL query string. A referrer
+        // header sent from here (e.g. to any external resource the page ever
+        // loads) would leak it to that third party; browser history and
+        // server/proxy access logs already capture the URL regardless, which
+        // is a separate risk the token's short TTL + single-use + hashed-at-
+        // rest storage are meant to bound.
+        source: '/reset-password',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+    ];
+  },
   async rewrites() {
     return {
       beforeFiles: [],

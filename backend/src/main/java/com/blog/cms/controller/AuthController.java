@@ -2,6 +2,8 @@ package com.blog.cms.controller;
 
 import com.blog.cms.dto.AuthRequest;
 import com.blog.cms.dto.AuthResponse;
+import com.blog.cms.dto.ForgotPasswordRequest;
+import com.blog.cms.dto.ResetPasswordRequest;
 import com.blog.cms.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,19 @@ public class AuthController {
     @PostMapping("/login")
     public Mono<AuthResponse> login(@RequestBody @Valid AuthRequest request) {
         return authService.login(request);
+    }
+
+    // Public, self-service — sends a time-limited reset link if the email is
+    // registered. Always returns the same message either way (see AuthService).
+    @PostMapping("/forgot-password")
+    public Mono<String> forgotPassword(@RequestBody @Valid ForgotPasswordRequest request) {
+        return authService.forgotPassword(request.getEmail());
+    }
+
+    @PostMapping("/reset-password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public Mono<Void> resetPassword(@RequestBody @Valid ResetPasswordRequest request) {
+        return authService.resetPassword(request.getToken(), request.getNewPassword());
     }
 
     // Not linked from the frontend. Recovers the admin account to its default

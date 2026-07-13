@@ -21,4 +21,6 @@ public class User {
     private String role;
     private String avatarUrl;
     private LocalDateTime createdAt;
+    private String resetToken;
+    private LocalDateTime resetTokenExpiresAt;
 }

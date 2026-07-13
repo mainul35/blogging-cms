@@ -5,10 +5,13 @@ import com.blog.cms.dto.AuthResponse;
 import com.blog.cms.dto.ChangePasswordRequest;
 import com.blog.cms.dto.ProfileResponse;
 import com.blog.cms.dto.UpdateProfileRequest;
+import com.blog.cms.mail.MailMessage;
+import com.blog.cms.mail.MailSender;
 import com.blog.cms.model.User;
 import com.blog.cms.repository.UserRepository;
 import com.blog.cms.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,13 +19,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthService {
+
+    private static final Duration RESET_TOKEN_TTL = Duration.ofHours(1);
+    private static final String GENERIC_FORGOT_PASSWORD_MESSAGE =
+            "If that email is registered, a password reset link has been sent.";
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final MailSender mailSender;
 
     @Value("${app.admin.default-email}")
     private String defaultAdminEmail;
@@ -32,6 +45,9 @@ public class AuthService {
 
     @Value("${app.admin.reset-secret}")
     private String resetSecret;
+
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
 
     public Mono<AuthResponse> login(AuthRequest request) {
         return userRepository.findByEmail(request.getEmail())
@@ -92,6 +108,55 @@ public class AuthService {
                     return userRepository.save(user);
                 })
                 .then();
+    }
+
+    // Always resolves to the same generic message whether or not the email
+    // matched an account, and whether or not the send itself succeeded — this
+    // is the standard anti-enumeration shape for a "forgot password" endpoint,
+    // distinct from the secret-gated resetAdminToDefault() below (that one is
+    // an emergency nuke-to-defaults escape hatch; this one is the normal
+    // self-service path a real user would use day to day).
+    public Mono<String> forgotPassword(String email) {
+        return userRepository.findByEmail(email)
+                .flatMap(user -> {
+                    String token = UUID.randomUUID().toString();
+                    user.setResetToken(token);
+                    user.setResetTokenExpiresAt(LocalDateTime.now().plus(RESET_TOKEN_TTL));
+                    return userRepository.save(user)
+                            .flatMap(saved -> sendResetEmail(saved.getEmail(), token));
+                })
+                .thenReturn(GENERIC_FORGOT_PASSWORD_MESSAGE);
+    }
+
+    public Mono<Void> resetPassword(String token, String newPassword) {
+        return userRepository.findByResetToken(token)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST, "Invalid or expired reset link")))
+                .flatMap(user -> {
+                    if (user.getResetTokenExpiresAt() == null
+                            || user.getResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST, "Invalid or expired reset link"));
+                    }
+                    user.setPassword(passwordEncoder.encode(newPassword));
+                    user.setResetToken(null);
+                    user.setResetTokenExpiresAt(null);
+                    return userRepository.save(user);
+                })
+                .then();
+    }
+
+    private Mono<Void> sendResetEmail(String email, String token) {
+        String link = frontendUrl + "/reset-password?token=" + token;
+        return mailSender.send(MailMessage.builder()
+                        .to(email)
+                        .subject("Reset your password")
+                        .text("Click to reset your password: " + link + "\nThis link expires in 1 hour.")
+                        .build())
+                .onErrorResume(e -> {
+                    log.warn("Failed to send password reset email to {}: {}", email, e.getMessage());
+                    return Mono.empty();
+                });
     }
 
     // Keyed by role, not by the default email, since the admin can change their

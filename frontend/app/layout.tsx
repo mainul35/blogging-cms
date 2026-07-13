@@ -30,11 +30,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="flex items-center gap-6">
               <a href="/blog" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Home</a>
               <a href="/blog" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Blog</a>
-              {isAuthenticated ? (
-                <UserMenu />
-              ) : (
-                <a href="/login" className="text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">Admin Login</a>
-              )}
+              {isAuthenticated && <UserMenu />}
             </div>
           </nav>
         </header>

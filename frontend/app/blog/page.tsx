@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import { Post } from '@/types/post';
-import PostList from '@/components/blog/PostList';
+import BlogSearch from '@/components/blog/BlogSearch';
 import NewsletterForm from '@/components/blog/NewsletterForm';
 import { getSiteSettings } from '@/lib/settings';
 
@@ -22,27 +22,11 @@ export default async function BlogPage() {
           <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
             Discover insightful stories, tutorials, and ideas from our community of writers.
           </p>
-
-          {/* Search Bar */}
-          <form action="/blog" method="get" className="max-w-md mx-auto flex gap-2">
-            <input
-              type="search"
-              name="q"
-              placeholder="Search articles..."
-              aria-label="Search articles"
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-            <button
-              type="submit"
-              className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors text-sm"
-            >
-              Search
-            </button>
-          </form>
         </section>
 
-        {/* Blog Posts Grid */}
-        <PostList posts={posts} />
+        {/* Realtime search + results grid -- client component, filters the
+            already-fetched posts on every keystroke, no round-trip. */}
+        <BlogSearch posts={posts} />
 
         {/* Newsletter subscribe widget below the post grid */}
         <div className="mt-12">

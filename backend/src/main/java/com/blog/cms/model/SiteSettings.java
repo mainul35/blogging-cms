@@ -14,4 +14,9 @@ public class SiteSettings {
     @Id
     private Long id;
     private String siteName;
+    private boolean setupCompleted;
+    private String theme;
+    private String contrast;
+    private String font;
+    private String accentColor;
 }

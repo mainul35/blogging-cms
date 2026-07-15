@@ -2,6 +2,7 @@ package com.blog.cms.service;
 
 import com.blog.cms.dto.SiteSettingsRequest;
 import com.blog.cms.dto.SiteSettingsResponse;
+import com.blog.cms.model.SiteSettings;
 import com.blog.cms.repository.SiteSettingsRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -19,8 +20,7 @@ public class SiteSettingsService {
     private final SiteSettingsRepository repository;
 
     public Mono<SiteSettingsResponse> getSettings() {
-        return repository.findById(SETTINGS_ID)
-                .map(settings -> SiteSettingsResponse.builder().siteName(settings.getSiteName()).build());
+        return repository.findById(SETTINGS_ID).map(this::toResponse);
     }
 
     public Mono<SiteSettingsResponse> updateSettings(SiteSettingsRequest request) {
@@ -28,8 +28,22 @@ public class SiteSettingsService {
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Site settings not found")))
                 .flatMap(settings -> {
                     settings.setSiteName(request.getSiteName());
+                    settings.setTheme(request.getTheme());
+                    settings.setContrast(request.getContrast());
+                    settings.setFont(request.getFont());
+                    settings.setAccentColor(request.getAccentColor());
                     return repository.save(settings);
                 })
-                .map(settings -> SiteSettingsResponse.builder().siteName(settings.getSiteName()).build());
+                .map(this::toResponse);
+    }
+
+    private SiteSettingsResponse toResponse(SiteSettings settings) {
+        return SiteSettingsResponse.builder()
+                .siteName(settings.getSiteName())
+                .theme(settings.getTheme())
+                .contrast(settings.getContrast())
+                .font(settings.getFont())
+                .accentColor(settings.getAccentColor())
+                .build();
     }
 }

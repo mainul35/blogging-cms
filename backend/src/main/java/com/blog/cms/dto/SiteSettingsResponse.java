@@ -8,4 +8,8 @@ import lombok.*;
 @AllArgsConstructor
 public class SiteSettingsResponse {
     private String siteName;
+    private String theme;
+    private String contrast;
+    private String font;
+    private String accentColor;
 }

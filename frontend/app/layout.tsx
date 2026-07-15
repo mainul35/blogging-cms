@@ -1,12 +1,21 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Merriweather, JetBrains_Mono } from 'next/font/google';
 import { cookies } from 'next/headers';
 import { getSiteSettings } from '@/lib/settings';
+import { accentCssVars, type Font } from '@/lib/personalization';
 import './globals.css';
 import UserMenu from '@/components/UserMenu';
 import ReaderSessionProvider from '@/components/ReaderSessionProvider';
 
 const inter = Inter({ subsets: ['latin'] });
+const merriweather = Merriweather({ subsets: ['latin'], weight: ['400', '700'] });
+const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'] });
+
+const FONT_FAMILY_MAP: Record<Font, string> = {
+  inter: inter.style.fontFamily,
+  serif: merriweather.style.fontFamily,
+  mono: jetbrainsMono.style.fontFamily,
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const { siteName } = await getSiteSettings();
@@ -17,12 +26,43 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const { siteName } = await getSiteSettings();
+  const { siteName, theme, contrast, font, accentColor } = await getSiteSettings();
   const isAuthenticated = !!(await cookies()).get('token')?.value;
 
+  // 'system' resolves client-side (see the inline script below) to avoid
+  // needing a cookie just to remember the visitor's OS preference -- 'light'
+  // is the safe default in the meantime, so only dark-preferring visitors
+  // see a brief flash rather than everyone.
+  const resolvedTheme = theme === 'system' ? 'light' : theme;
+  const htmlStyle = {
+    '--font-body': FONT_FAMILY_MAP[font],
+    ...accentCssVars(accentColor),
+  } as React.CSSProperties;
+
   return (
-    <html lang="en">
-      <body className={`${inter.className} h-screen flex flex-col overflow-hidden bg-gray-50 text-gray-900`}>
+    // suppressHydrationWarning is required here: when theme is "system", the
+    // inline script below mutates data-theme on the client before hydration
+    // based on the visitor's OS preference, which will legitimately differ
+    // from what the server rendered ("light", the safe default) -- without
+    // this, React treats that as an error and discards the server-rendered
+    // tree instead of just leaving the attribute alone (the standard fix
+    // used by next-themes and other theme-switcher libraries).
+    <html lang="en" data-theme={resolvedTheme} data-contrast={contrast} style={htmlStyle} suppressHydrationWarning>
+      <body className="h-screen flex flex-col overflow-hidden bg-gray-50 text-gray-900">
+        {theme === 'system' && (
+          // A plain (not next/script) inline script, placed first in <body>,
+          // executes synchronously as the parser reaches it -- before the
+          // rest of the visible page -- so a dark-preferring visitor doesn't
+          // see a light flash first when the site is set to "match device"
+          // rather than a fixed theme.
+          <script
+            suppressHydrationWarning
+            dangerouslySetInnerHTML={{
+              __html:
+                "(function(){try{if(window.matchMedia('(prefers-color-scheme: dark)').matches){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();",
+            }}
+          />
+        )}
         {/* Top Navigation Bar — shrink-0 keeps it fixed height, never scrolls out of view */}
         <header className="shrink-0 bg-white border-b border-gray-200 shadow-sm">
           <nav className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">

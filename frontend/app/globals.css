@@ -5,12 +5,152 @@
 body {
   color: #111827;
   background: #ffffff;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body, system-ui, -apple-system, sans-serif);
 }
 
 a {
-  color: #1d4ed8;
+  color: var(--accent-700, #1d4ed8);
 }
+
+/* ============ Personalization ============
+   theme/contrast/accentColor come from site_settings, applied by the root
+   layout via data-theme/data-contrast attributes + --accent-* CSS custom
+   properties on <html> (see app/layout.tsx, lib/personalization.ts). These
+   rules override the specific Tailwind utility classes already used
+   throughout the app instead of requiring every component to be rewritten
+   with dark:/contrast-aware variants -- with ~40+ components involved, this
+   is the proportional way to make a genuinely site-wide toggle. Placed after
+   @tailwind utilities above, so equal-specificity ties resolve in our favor;
+   attribute-selector rules already outrank a plain utility class regardless. */
+
+/* --- Accent color: the site's one "brand" color (links, primary blue
+   buttons, active nav highlight) -- NOT the black primary-action buttons
+   used in admin/auth forms, which stay neutral regardless of accent. --- */
+.bg-blue-50 { background-color: var(--accent-50, #eff6ff); }
+.bg-blue-600 { background-color: var(--accent-600, #2563eb); }
+.hover\:bg-blue-700:hover { background-color: var(--accent-700, #1d4ed8); }
+.hover\:bg-blue-800:hover { background-color: var(--accent-800, #1e40af); }
+.hover\:bg-blue-50:hover { background-color: var(--accent-50, #eff6ff); }
+.text-blue-600 { color: var(--accent-600, #2563eb); }
+.text-blue-700 { color: var(--accent-700, #1d4ed8); }
+.text-blue-800 { color: var(--accent-800, #1e40af); }
+.hover\:text-blue-700:hover { color: var(--accent-700, #1d4ed8); }
+.hover\:text-blue-800:hover { color: var(--accent-800, #1e40af); }
+.border-blue-200 { border-color: var(--accent-50, #eff6ff); }
+.border-blue-500 { border-color: var(--accent-500, #3b82f6); }
+.focus\:ring-blue-500:focus { --tw-ring-color: var(--accent-500, #3b82f6); }
+.focus\:ring-black:focus { --tw-ring-color: var(--accent-600, #2563eb); }
+
+/* --- Dark theme: swap the light-mode surface/text/border shades used
+   throughout the app for darker equivalents. --- */
+[data-theme='dark'] body { background-color: #0b1120; color: #e5e7eb; }
+[data-theme='dark'] .bg-white { background-color: #1f2937; }
+[data-theme='dark'] .bg-gray-50 { background-color: #111827; }
+[data-theme='dark'] .bg-gray-100 { background-color: #1f2937; }
+[data-theme='dark'] .bg-gray-200 { background-color: #374151; }
+[data-theme='dark'] .text-gray-900 { color: #f3f4f6; }
+[data-theme='dark'] .text-gray-800 { color: #e5e7eb; }
+[data-theme='dark'] .text-gray-700 { color: #d1d5db; }
+[data-theme='dark'] .text-gray-600 { color: #9ca3af; }
+[data-theme='dark'] .text-gray-500 { color: #9ca3af; }
+[data-theme='dark'] .text-gray-400 { color: #6b7280; }
+[data-theme='dark'] .border,
+[data-theme='dark'] .border-gray-200,
+[data-theme='dark'] .border-gray-300 { border-color: #374151; }
+[data-theme='dark'] .bg-green-50 { background-color: rgba(34, 197, 94, 0.12); }
+[data-theme='dark'] .bg-red-50 { background-color: rgba(239, 68, 68, 0.12); }
+[data-theme='dark'] .shadow-sm { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+
+/* Same problem as the form-control fix below, different trigger: these are
+   the hover-state variants of the light-mode surface/text classes above.
+   Missing them meant every hoverable row/nav-item/icon-button (sidebar nav,
+   dropdown menus, table rows) rendered light-gray-on-light-gray -- invisible
+   -- the instant you moused over it in dark mode, even though the resting
+   (non-hover) state looked correct. hover:bg-gray-800 is deliberately left
+   alone: it's used on already-dark bg-black buttons, which stay legible on a
+   dark page without needing a swap. */
+[data-theme='dark'] .hover\:bg-gray-50:hover { background-color: #1f2937; }
+[data-theme='dark'] .hover\:bg-gray-100:hover { background-color: #374151; }
+[data-theme='dark'] .hover\:bg-gray-200:hover { background-color: #4b5563; }
+[data-theme='dark'] .hover\:bg-white:hover { background-color: #1f2937; }
+[data-theme='dark'] .hover\:text-gray-700:hover { color: #e5e7eb; }
+[data-theme='dark'] .hover\:text-black:hover { color: #f9fafb; }
+[data-theme='dark'] .hover\:border-gray-300:hover { border-color: #4b5563; }
+[data-theme='dark'] .hover\:border-gray-400:hover { border-color: #6b7280; }
+
+/* Form controls across the app mostly rely on the browser's own default
+   white input background (no explicit bg-white class), while their text
+   color is inherited from a dark-mode-overridden ancestor -- without this,
+   every text/email/password/search input site-wide renders near-invisible
+   light text on a stock white box. Checkboxes/radios are excluded since
+   tinting their native box reads as broken rather than "dark mode". */
+[data-theme='dark'] input:not([type='checkbox']):not([type='radio']),
+[data-theme='dark'] textarea,
+[data-theme='dark'] select {
+  background-color: #1f2937;
+  color: #f3f4f6;
+  border-color: #374151;
+}
+[data-theme='dark'] input::placeholder,
+[data-theme='dark'] textarea::placeholder {
+  color: #6b7280;
+}
+
+/* Tailwind Typography's `.prose` article content (blog post bodies) uses its
+   own internal --tw-prose-* CSS variables for every text color, completely
+   independent of the plain .text-gray-* utility overrides above -- so post
+   body text stayed styled for a light background even after the rest of the
+   page went dark, reading as low-contrast gray-on-navy rather than actually
+   invisible, but still hard to read. These are the same values
+   @tailwindcss/typography's own `prose-invert` variant sets; applying them
+   under [data-theme='dark'] gets the identical result without needing
+   prose-invert added to MarkdownRenderer's className. Inline code/pre
+   backgrounds need a separate plain-selector override: Typography's own
+   modifier classes (prose-code:bg-gray-100 etc.) compile to :where(...)
+   selectors, which carry zero specificity, so a plain selector always wins
+   regardless of source order. */
+[data-theme='dark'] .prose {
+  --tw-prose-body: #d1d5db;
+  --tw-prose-headings: #ffffff;
+  --tw-prose-lead: #9ca3af;
+  --tw-prose-links: #ffffff;
+  --tw-prose-bold: #ffffff;
+  --tw-prose-counters: #9ca3af;
+  --tw-prose-bullets: #4b5563;
+  --tw-prose-hr: #374151;
+  --tw-prose-quotes: #f3f4f6;
+  --tw-prose-quote-borders: #374151;
+  --tw-prose-captions: #9ca3af;
+  --tw-prose-code: #ffffff;
+  --tw-prose-pre-code: #d1d5db;
+  --tw-prose-pre-bg: rgba(0, 0, 0, 0.5);
+  --tw-prose-th-borders: #4b5563;
+  --tw-prose-td-borders: #374151;
+}
+[data-theme='dark'] .prose code { background-color: #374151; }
+[data-theme='dark'] .prose pre { background-color: #030712; }
+/* code inside a pre block shouldn't get the inline-code chip background above
+   -- <code> is an inline element, so painting a background on one that wraps
+   across multiple lines (a multi-line code block) paints a separate box per
+   line instead of one solid block. The pre itself already has its own dark
+   background, so the nested code doesn't need one at all. */
+[data-theme='dark'] .prose pre code { background-color: transparent; }
+
+/* --- High contrast: darken/lighten the softest text & border shades that
+   would otherwise fail contrast guidelines for readers who need it. --- */
+[data-contrast='high'] .text-gray-400 { color: #374151; }
+[data-contrast='high'] .text-gray-500 { color: #1f2937; }
+[data-contrast='high'] .text-gray-600 { color: #111827; }
+[data-contrast='high'] .border,
+[data-contrast='high'] .border-gray-200,
+[data-contrast='high'] .border-gray-300 { border-color: #6b7280; border-width: 1.5px; }
+
+[data-theme='dark'][data-contrast='high'] .text-gray-400 { color: #d1d5db; }
+[data-theme='dark'][data-contrast='high'] .text-gray-500 { color: #e5e7eb; }
+[data-theme='dark'][data-contrast='high'] .text-gray-600 { color: #f3f4f6; }
+[data-theme='dark'][data-contrast='high'] .border,
+[data-theme='dark'][data-contrast='high'] .border-gray-200,
+[data-theme='dark'][data-contrast='high'] .border-gray-300 { border-color: #9ca3af; border-width: 1.5px; }
 
 /* Animation utilities for dropdown menus */
 @keyframes fadeIn {

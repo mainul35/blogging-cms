@@ -70,8 +70,14 @@ All under `backend/src/main/resources/db/migration/`:
 | V4 | `comments`, `comment_mentions` + indexes |
 | V5 | `newsletter_subscribers` + indexes |
 | V6 | `avatar_url` column on `users` (for profile self-service) |
+| V7 | `site_settings` single-row table (site name; later also `setup_completed`) |
+| V8 | `readers`, `reader_oauth_identities` + `comments.reader_id`/`comment_mentions.mentioned_reader_id` |
+| V9 | `reset_token`/`reset_token_expires_at` columns on `users` (forgot/reset password) |
+| V10 | `setup_completed` boolean on `site_settings` (initial setup wizard, see below) |
+| V11 | `mail_settings` single-row table (provider, from/reply-to, SMTP/Resend/SendGrid fields) — mail config moved from `application.yml` into the DB, editable from Settings > Mail / the setup wizard |
+| V12 | `theme`/`contrast`/`font`/`accent_color` columns on `site_settings` — editable from Settings > Personalization, see below |
 
-Default seeded admin: `admin@blog.com` / `Admin@1234` (BCrypt hashed) — also the target of the emergency-reset endpoint (see below), configured via `app.admin.default-email` / `app.admin.default-password`.
+Default seeded admin: `admin@blog.com` / `Admin@1234` (BCrypt hashed) — the target of the emergency-reset endpoint (see below), configured via `app.admin.default-email` / `app.admin.default-password`. On a fresh install these credentials are only ever used to complete the one-time **initial setup wizard** (see "Initial Setup Wizard" below), which replaces them with the self-hoster's own identity.
 
 ## Security Rules (SecurityConfig)
 
@@ -83,6 +89,9 @@ POST /api/posts/*/comments                             → permitAll  (guest com
 /api/newsletter/subscribe, /newsletter/confirm         → permitAll
 POST /api/readers/oauth-login                          → permitAll (real gate is the internal-secret header check
                                                           inside ReaderService, not Spring Security)
+/api/setup/**                                          → permitAll (real gate is the setup_completed flag check
+                                                          inside SetupService, not Spring Security — same shape
+                                                          as the reader-oauth-login and emergency-reset endpoints)
 /api/admin/**                                          → hasRole("ADMIN")  (incl. account/profile, account/password, uploads)
 anyExchange                                            → authenticated
 ```
@@ -94,6 +103,27 @@ POST /api/auth/login                    → AuthResponse { token, email, role, n
 POST /api/auth/emergency-reset          → 204; header X-Admin-Reset-Secret must match ADMIN_RESET_SECRET;
                                            NOT linked from frontend; resets admin email+password to defaults
                                            (keyed by role, so it finds the admin even if email was changed)
+POST /api/auth/forgot-password          → String (always the same generic message; rate-limited via Redis,
+                                           5 requests/15min per email; hashes+stores a reset token, emails a link)
+POST /api/auth/reset-password           → 204; body { token, newPassword }; token is SHA-256-hashed at rest,
+                                           1hr TTL, single-use (cleared on success)
+
+GET  /api/mail-settings/status           → { configured: boolean } — public; true whenever provider != "log".
+                                           Gates newsletter signup + "forgot password" link/page on the
+                                           frontend, and is enforced again server-side (503 on subscribe,
+                                           an honest non-generic message on forgot-password) for anyone
+                                           hitting those endpoints directly while mail isn't configured.
+
+GET  /api/setup/status                  → { completed: boolean } — public, polled by frontend middleware
+POST /api/setup                         → 204; body { siteName, adminName, adminEmail, adminPassword,
+                                           mailSettings? }; 403 if setup_completed is already true (one-time
+                                           only, see below); mailSettings is optional, same shape as PUT below
+
+GET  /api/admin/mail-settings           → current provider config; secrets never returned raw, only
+                                           hasSmtpPassword/hasResendApiKey/hasSendgridApiKey booleans
+PUT  /api/admin/mail-settings           → body { provider, fromAddress, replyTo, smtpHost, smtpPort,
+                                           smtpUsername, smtpPassword, smtpAuth, smtpStarttls, resendApiKey,
+                                           sendgridApiKey }; blank secret fields = keep the existing saved value
 
 GET  /api/admin/account/profile         → ProfileResponse (auth required)
 PUT  /api/admin/account/profile         → AuthResponse (fresh token — subject/email may have changed)
@@ -131,13 +161,20 @@ POST /api/readers/oauth-login           → ReaderAuthResponse (internal only �
 ```
 app/
   page.tsx                    Homepage
-  (auth)/login/               Login page (no register page — removed)
+  (auth)/login/               Login page — NOT linked from the public header (see Initial Setup Wizard below)
+  (auth)/forgot-password/     Request a reset link (generic response, anti-enumeration)
+  (auth)/reset-password/      Set new password from emailed token (wrapped in <Suspense>, uses useSearchParams)
+  (auth)/setup/                Initial setup wizard (site name + admin name/email/password), one-time only
   (admin)/layout.tsx          Admin shell (collapsible Sidebar + fluid content panel)
   (admin)/dashboard/          Stats cards
   (admin)/posts/              Post list + create/edit/delete
   (admin)/comments/           Comment moderation table
   (admin)/newsletter/         Newsletter management (subscribers + send digest)
-  (admin)/settings/           Profile (email/name/avatar) + change-password forms
+  (admin)/settings/layout.tsx Sub-nav (Profile / Mail / Personalization) — own client layout, not the outer Sidebar
+  (admin)/settings/           Redirects to /settings/profile
+  (admin)/settings/profile/   Profile (email/name/avatar) + change-password forms
+  (admin)/settings/mail/      Mail gateway config — GET/PUT /api/admin/mail-settings via MailProviderFields
+  (admin)/settings/personalization/  Site name
   blog/                       Public post listing + NewsletterForm
   post/[slug]/                Individual post + CommentSection + NewsletterForm
 
@@ -174,7 +211,7 @@ lib/
 frontend/.env.example — NEXT_PUBLIC_SITE_NAME, NEXT_PUBLIC_BACKEND_URL, BACKEND_URL (all optional, defaults work out of the box)
 
 types/
-  post.ts, user.ts (now incl. Profile/UpdateProfileRequest), comment.ts, newsletter.ts
+  post.ts, user.ts (now incl. Profile/UpdateProfileRequest), comment.ts, newsletter.ts, mailSettings.ts
 ```
 
 ## Key Frontend Behaviours
@@ -197,7 +234,7 @@ types/
 
 **Reader identity (Google/GitHub sign-in for comments/mentions/newsletter):** entirely separate from admin auth. NextAuth v4 handles the OAuth dance on the frontend, mounted at `/api/reader-auth/[...nextauth]` — **not** the default `/api/auth/[...nextauth]`, which would collide with the existing admin `/api/auth/login`/`emergency-reset` routes (no Next.js route exists there today; they only work via `next.config.js`'s rewrite proxy, which the plain-array `rewrites()` form checks *before* dynamic catch-all routes — this exact collision broke reader sign-in once already, fixed by moving the backend-proxy rewrite into the `fallback` bucket). On first sign-in, NextAuth's `jwt` callback calls the backend's `POST /api/readers/oauth-login` (secret-gated, not Spring-Security-gated) to upsert a `readers` row and mint a reader-scoped JWT (`role: READER`, subject = reader's slugified+deduped `handle`, not email — a reader can have two rows if they sign in via Google and GitHub with the same email, deliberately not merged). That JWT flows through the *same* `JwtAuthFilter`/`JwtUtil` as admin tokens, no filter-chain changes. Guest commenting (no login) still works unchanged.
 
-**Mail delivery:** see the `mail/` package above. Default is `log` (just logs, nothing sent — zero config). To send real email, set `app.mail.provider` to `smtp`/`resend`/`sendgrid` plus that provider's config block in `application.yml`. For local testing without a real provider account, `docker-compose.yml` includes an opt-in `mailpit` service (`docker compose up -d mailpit`, SMTP on `1025`, web UI on `http://localhost:8025`) — point `app.mail.provider=smtp` at `MAIL_SMTP_HOST=localhost MAIL_SMTP_PORT=1025 MAIL_SMTP_AUTH=false MAIL_SMTP_STARTTLS=false` and every confirmation/digest email shows up in the Mailpit UI instead of a real inbox.
+**Mail delivery:** config lives in the `mail_settings` DB table (V11), not `application.yml` — editable from **Settings > Mail** or the initial setup wizard's optional mail step, no restart needed. `MailSenderRouter` (the only Spring-registered `MailSender` bean) reads the current row on every `send()` call and dispatches to `LogMailSender`/`SmtpMailSender`/`ResendMailSender`/`SendGridMailSender` — those three are now plain per-call helpers (no `@Component`/`@ConditionalOnProperty`), constructed fresh each send from whatever's currently saved, which is what makes switching providers a UI action instead of a redeploy. Default is `log` (just logs, nothing sent — zero config), seeded by the V11 migration. Secrets (`smtpPassword`, `resendApiKey`, `sendgridApiKey`) are never sent back to the client after saving — the GET response only reports `hasSmtpPassword`/etc. booleans, and a blank secret field on save means "keep the existing value," not "clear it." For local testing without a real provider account, `docker-compose.yml` includes an opt-in `mailpit` service (`docker compose up -d mailpit`, SMTP on `1025`, web UI on `http://localhost:8025`) — set provider "smtp", host `localhost`, port `1025`, auth/STARTTLS off from Settings > Mail, and every confirmation/digest email shows up in the Mailpit UI instead of a real inbox.
 
 ### Setup guide — Google/GitHub sign-in
 
@@ -216,29 +253,33 @@ types/
 
 ### Setup guide — mail providers
 
-Set `app.mail.provider` (or `MAIL_PROVIDER` if you prefer overriding via env — the yml key doesn't currently read from one, so edit `application.yml` directly or pass `--app.mail.provider=...` as a run arg) to one of:
+Configure from **Settings > Mail** (post-login) or the initial setup wizard's optional mail step (pre-login, first run only) — no env vars or `application.yml` edits needed anymore. Pick a provider from the dropdown:
 
-- **`log`** (default) — nothing to configure. Emails are logged, not sent.
-- **`smtp`** — works with Gmail, any self-hosted server, and AWS SES/Mailgun/Postmark via their SMTP relay credentials:
-  ```
-  MAIL_SMTP_HOST=smtp.gmail.com        # or your provider's SMTP host
-  MAIL_SMTP_PORT=587
-  MAIL_SMTP_USERNAME=you@gmail.com
-  MAIL_SMTP_PASSWORD=<an App Password, not your real Gmail password>
-  MAIL_SMTP_AUTH=true
-  MAIL_SMTP_STARTTLS=true
-  ```
-  Gmail specifically requires an [App Password](https://myaccount.google.com/apppasswords) (2FA must be on) — a normal account password will be rejected.
-- **`resend`** — sign up at resend.com, verify a sending domain (or use their shared test domain for dev), create an API key:
-  ```
-  RESEND_API_KEY=re_...
-  ```
-- **`sendgrid`** — sign up, verify a sender identity, create a full-access (or Mail Send scoped) API key:
-  ```
-  SENDGRID_API_KEY=SG...
-  ```
-- All providers also read `app.mail.from` (the sender address) and optionally `MAIL_REPLY_TO`.
-- **Local sandbox, no account needed:** `docker compose up -d mailpit`, then `provider=smtp` with `MAIL_SMTP_HOST=localhost MAIL_SMTP_PORT=1025 MAIL_SMTP_AUTH=false MAIL_SMTP_STARTTLS=false` — every email shows up at `http://localhost:8025` instead of anyone's real inbox. This is what was used to verify the SMTP path end-to-end (see plan.md's Post-Launch Changes).
+- **Log only** (default) — nothing to configure. Emails are logged, not sent.
+- **SMTP** — works with Gmail, any self-hosted server, and AWS SES/Mailgun/Postmark via their SMTP relay credentials. Fields: host, port, username, password, auth on/off, STARTTLS on/off. Gmail specifically requires an [App Password](https://myaccount.google.com/apppasswords) (2FA must be on) — a normal account password will be rejected.
+- **Resend** — sign up at resend.com, verify a sending domain (or use their shared test domain for dev), paste the API key into the "Resend API key" field.
+- **SendGrid** — sign up, verify a sender identity, paste a full-access (or Mail Send scoped) API key into the "SendGrid API key" field.
+- Every provider also has a "From address" and optional "Reply-to" field on the same form.
+- **Local sandbox, no account needed:** `docker compose up -d mailpit`, then in Settings > Mail pick SMTP with host `localhost`, port `1025`, auth off, STARTTLS off — every email shows up at `http://localhost:8025` instead of anyone's real inbox. This is what was used to verify the SMTP path end-to-end (see plan.md's Post-Launch Changes).
+- Saved secrets are never re-displayed — the form shows a masked placeholder when one's already set, and leaving the field blank on save keeps the existing value rather than clearing it.
+
+## Initial Setup Wizard & Admin Login Visibility
+
+**Motivation:** researched how personal-blog CMSes like WordPress actually work (`piotrminkowski.com`, confirmed via live inspection): the public theme **never** renders a login link anywhere — no nav item, no footer link — yet the owner still logs in by navigating straight to `/wp-login.php`/`/wp-admin` from memory/bookmark. Comments there also use WordPress's stock Jetpack guest-comment form (name/email/website, no mandatory account). This CMS now follows the same shape:
+
+- `app/layout.tsx`'s public header renders **nothing** when logged out (previously showed an "Admin Login" link — deliberately removed again after a brief round-trip where it was reinstated, then removed for good once this research settled the question). `/login` still exists and works; it's just never linked. Logged-in state still shows `UserMenu` as before.
+- **First-run problem this uncovered:** without a visible login link, a fresh self-hoster has no obvious way to discover their own credentials — and shipping a fixed `admin@blog.com`/`Admin@1234` default forever is exactly the kind of insecure-default WordPress's own install wizard (`install.php`) was built to avoid. So this CMS now has an equivalent: a **one-time initial setup wizard** at `/setup`.
+- **Backend (`SetupService`/`SetupController`, `V10__add_setup_completed.sql`):** `site_settings.setup_completed` (boolean, default false) gates everything. `GET /api/setup/status` is public and cheap (single row read). `POST /api/setup` takes `{ siteName, adminName, adminEmail, adminPassword }`, updates the seeded ADMIN row's username/email/password and `site_settings.site_name`, then flips `setup_completed` to true — and permanently 403s on any further call. This is the same "self-guarded public endpoint" shape as `emergency-reset` (secret-gated) and `readers/oauth-login` (internal-header-gated), just gated by the one-time flag instead.
+- **Frontend (`middleware.ts`):** extended the existing cookie-based auth-gate middleware to also call `GET /api/setup/status` for its matched routes (`/login`, `/dashboard/**`, `/posts/**`, `/comments/**`, `/newsletter/**`, `/settings/**`, `/setup`) — if setup isn't done, every one of those redirects to `/setup`; once it's done, hitting `/setup` again just bounces to `/login`. Public blog pages are **not** in the matcher, so this adds zero latency to ordinary reading traffic — only admin-adjacent routes pay for the extra `fetch`.
+- **Verified end-to-end:** fresh `setup_completed=false` → `POST /api/setup` → 204 → status flips to true → retry POST → 403 → login with the new credentials succeeds → old `admin@blog.com`/`Admin@1234` now 401s → browser: `/setup` redirects to `/login` (already completed), public `/blog` header has no login link at any auth state, `UserMenu` appears once signed in.
+
+## Site Personalization (theme / contrast / font / accent color)
+
+Set from **Settings > Personalization**, stored in `site_settings` (V12: `theme` light/dark/system, `contrast` normal/high, `font` inter/serif/mono, `accent_color` blue/green/purple/red/orange/pink). Applied by the root layout (`app/layout.tsx`) via `data-theme`/`data-contrast` attributes and `--font-body`/`--accent-*` CSS custom properties on `<html>`.
+
+**Key architectural choice**: rather than adding Tailwind `dark:`/contrast variants to every one of the ~40+ components (a large invasive refactor given the codebase's static-utility-class style), `frontend/app/globals.css` carries attribute-selector override blocks that retarget the *specific* Tailwind classes already in use everywhere — e.g. `[data-theme='dark'] .bg-white { ... }`, `[data-contrast='high'] .text-gray-500 { ... }`, and unconditional `.bg-blue-600 { background-color: var(--accent-600) }` for accent color (which is always resolvable since the CSS var is set on `<html>` and inherits down). This gives genuinely global coverage — verified across both the public blog and the admin dashboard — without touching component files. `lib/personalization.ts` is the single source of truth for the option lists, accent hex shades, and font CSS-var mapping, shared by the settings picker and the root layout.
+
+`theme: 'system'` resolves client-side via a plain inline `<script>` (not `next/script` — that produced hydration errors when placed anywhere in this root layout) that checks `prefers-color-scheme` and flips `data-theme` before paint; `<html>` has `suppressHydrationWarning` since a dark-preferring visitor's client mutation legitimately differs from the server's safe-default guess.
 
 ## Known Pre-Existing Bugs Fixed (worth knowing if something looks newly broken)
 

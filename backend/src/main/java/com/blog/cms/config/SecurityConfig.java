@@ -2,6 +2,7 @@ package com.blog.cms.config;
 
 import com.blog.cms.security.JwtAuthFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -15,6 +16,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -23,6 +25,12 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+
+    // Comma-separated, so a self-hoster running the frontend on a non-default
+    // port/host (or a second instance side-by-side for testing) can just add
+    // it here instead of needing a code change.
+    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    private String allowedOrigins;
 
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
@@ -34,6 +42,9 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.GET, "/api/posts/**", "/api/categories/**", "/api/tags/**").permitAll()
                         .pathMatchers(HttpMethod.GET, "/uploads/**").permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/settings").permitAll()
+                        // Self-guarded by setup_completed inside SetupService, not by role --
+                        // must be reachable before any admin session exists.
+                        .pathMatchers("/api/setup/**", "/api/setup").permitAll()
                         // Guest comments: POST is open; DELETE still requires auth (enforced by service)
                         .pathMatchers(HttpMethod.POST, "/api/posts/*/comments").permitAll()
                         // Newsletter subscribe + confirm are public; admin sub-paths are covered below
@@ -58,7 +69,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

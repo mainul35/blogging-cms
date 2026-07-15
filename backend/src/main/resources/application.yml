@@ -27,6 +27,10 @@ spring:
       max-disk-usage-per-part: 5MB   # hard backstop — keep >= app.upload.max-size-mb below
 
 app:
+  cors:
+    # Comma-separated. Add your frontend's origin here if it's not the default
+    # http://localhost:3000 (e.g. a different port, or a real domain in production).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   jwt:
     secret: change-this-to-a-very-long-random-secret-key-at-least-256-bits-long
     expiration-ms: 86400000   # 24 hours

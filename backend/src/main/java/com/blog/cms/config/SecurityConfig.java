@@ -42,6 +42,7 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.GET, "/api/posts/**", "/api/categories/**", "/api/tags/**").permitAll()
                         .pathMatchers(HttpMethod.GET, "/uploads/**").permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/settings").permitAll()
+                        .pathMatchers(HttpMethod.GET, "/api/mail-settings/status").permitAll()
                         // Self-guarded by setup_completed inside SetupService, not by role --
                         // must be reachable before any admin session exists.
                         .pathMatchers("/api/setup/**", "/api/setup").permitAll()

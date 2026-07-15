@@ -8,9 +8,10 @@ import {
   Globe, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useMailConfigured } from '@/lib/useMailConfigured';
 import packageJson from '../../package.json';
 
-const navItems = [
+const baseNavItems = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
   { href: '/posts',      label: 'Posts',      icon: FileText },
   { href: '/comments',   label: 'Comments',   icon: MessageSquare },
@@ -22,7 +23,13 @@ const COLLAPSED_KEY = 'admin_sidebar_collapsed';
 
 export default function Sidebar({ siteName }: { siteName: string }) {
   const pathname = usePathname();
+  const mailConfigured = useMailConfigured();
   const [collapsed, setCollapsed] = useState(false);
+
+  // Hidden rather than disabled -- with no mail gateway, there's nothing this
+  // page can do (no subscribers will ever confirm), so it's not just "greyed
+  // out," it's not a relevant feature of the site yet.
+  const navItems = baseNavItems.filter(item => item.href !== '/newsletter' || mailConfigured === true);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem(COLLAPSED_KEY) === 'true');

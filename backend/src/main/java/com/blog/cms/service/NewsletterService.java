@@ -25,6 +25,7 @@ public class NewsletterService {
     private final NewsletterRepository newsletterRepository;
     private final PostRepository postRepository;
     private final MailSender mailSender;
+    private final MailSettingsService mailSettingsService;
 
     @Value("${app.public-url}")
     private String publicUrl;
@@ -33,6 +34,19 @@ public class NewsletterService {
     private String frontendUrl;
 
     public Mono<String> subscribe(String email) {
+        // A subscriber saved while mail is unconfigured would sit "pending
+        // confirmation" forever with no way to ever confirm -- reject up
+        // front instead of quietly creating a stuck row. The frontend hides
+        // the signup form in this state already; this is the backend's own
+        // guard for anyone hitting the endpoint directly.
+        return mailSettingsService.isMailConfigured()
+                .flatMap(configured -> configured
+                        ? doSubscribe(email)
+                        : Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                                "Newsletter signup isn't available on this site right now.")));
+    }
+
+    private Mono<String> doSubscribe(String email) {
         return newsletterRepository.existsByEmail(email)
                 .flatMap(exists -> {
                     if (exists) {

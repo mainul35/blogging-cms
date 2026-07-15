@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { useMailConfigured } from '@/lib/useMailConfigured';
 
 export default function ForgotPasswordPage() {
+  const mailConfigured = useMailConfigured();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'sent'>('idle');
   const [error, setError] = useState('');
@@ -27,7 +29,16 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-sm">
         <h1 className="text-2xl font-bold mb-6">Forgot password</h1>
 
-        {status === 'sent' ? (
+        {mailConfigured === false ? (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Password reset via email isn&apos;t set up for this site yet. Contact the site administrator.
+            </p>
+            <Link href="/login" className="block text-center text-sm text-gray-600 hover:underline">
+              Back to sign in
+            </Link>
+          </div>
+        ) : status === 'sent' ? (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               If <span className="font-medium">{email}</span> is registered, we&apos;ve sent a password

@@ -36,6 +36,8 @@ public class AuthService {
     private static final Duration RESET_TOKEN_TTL = Duration.ofHours(1);
     private static final String GENERIC_FORGOT_PASSWORD_MESSAGE =
             "If that email is registered, a password reset link has been sent.";
+    private static final String MAIL_NOT_CONFIGURED_MESSAGE =
+            "Password reset via email isn't set up for this site yet. Contact the site administrator.";
     private static final int FORGOT_PASSWORD_MAX_REQUESTS = 5;
     private static final Duration FORGOT_PASSWORD_RATE_WINDOW = Duration.ofMinutes(15);
 
@@ -44,6 +46,7 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final MailSender mailSender;
     private final ReactiveRedisTemplate<String, Object> redisTemplate;
+    private final MailSettingsService mailSettingsService;
 
     @Value("${app.admin.default-email}")
     private String defaultAdminEmail;
@@ -125,6 +128,16 @@ public class AuthService {
     // an emergency nuke-to-defaults escape hatch; this one is the normal
     // self-service path a real user would use day to day).
     public Mono<String> forgotPassword(String email) {
+        // Told plainly rather than pretending to work -- if mail isn't
+        // configured, a "check your inbox" message would be actively
+        // misleading (nothing will ever arrive). This one message is static
+        // and identical for every caller regardless of email, so it doesn't
+        // weaken the anti-enumeration property of the message below it.
+        return mailSettingsService.isMailConfigured()
+                .flatMap(configured -> configured ? doForgotPassword(email) : Mono.just(MAIL_NOT_CONFIGURED_MESSAGE));
+    }
+
+    private Mono<String> doForgotPassword(String email) {
         // Checked before the DB lookup, and never surfaced to the caller either
         // way (still the same generic message) — an attacker spamming this
         // endpoint shouldn't be able to tell "rate limited" apart from "email

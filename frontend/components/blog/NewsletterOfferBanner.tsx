@@ -3,12 +3,15 @@
 import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 import { api } from '@/lib/api';
+import { useMailConfigured } from '@/lib/useMailConfigured';
 
 export default function NewsletterOfferBanner() {
+  const mailConfigured = useMailConfigured();
   const { data: session, status } = useSession();
   const [dismissed, setDismissed] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
 
+  if (mailConfigured !== true) return null;
   if (status !== 'authenticated' || dismissed || subscribed || !session?.readerEmail) return null;
 
   const handleSubscribe = async () => {

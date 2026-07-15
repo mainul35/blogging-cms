@@ -4,8 +4,10 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
 import { authLib } from '@/lib/auth';
+import { useMailConfigured } from '@/lib/useMailConfigured';
 
 export default function LoginPage() {
+  const mailConfigured = useMailConfigured();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -51,9 +53,11 @@ export default function LoginPage() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm font-medium">Password</label>
-              <Link href="/forgot-password" className="text-xs text-gray-500 hover:text-black hover:underline">
-                Forgot password?
-              </Link>
+              {mailConfigured && (
+                <Link href="/forgot-password" className="text-xs text-gray-500 hover:text-black hover:underline">
+                  Forgot password?
+                </Link>
+              )}
             </div>
             <div className="relative">
               <input

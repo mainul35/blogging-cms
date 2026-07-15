@@ -2,13 +2,21 @@
 
 import { useState } from 'react';
 import { api } from '@/lib/api';
+import { useMailConfigured } from '@/lib/useMailConfigured';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
 export default function NewsletterForm() {
+  const mailConfigured = useMailConfigured();
   const [email, setEmail]     = useState('');
   const [status, setStatus]   = useState<Status>('idle');
   const [message, setMessage] = useState('');
+
+  // Signing up would be a dead end without a working mail gateway -- the
+  // confirmation email (and every digest after) would just log server-side,
+  // invisible to the visitor. Also covers the still-loading (null) case, so
+  // this never flashes in and then disappears once the real status arrives.
+  if (mailConfigured !== true) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

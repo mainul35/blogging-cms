@@ -43,24 +43,9 @@ app:
     # callback — must be identical in both places, same operational shape as
     # ADMIN_RESET_SECRET above.
     auth-secret: ${INTERNAL_AUTH_SECRET:change-this-internal-secret}
-  mail:
-    # log | smtp | resend | sendgrid — smtp also covers AWS SES / Mailgun /
-    # Postmark via their SMTP relay credentials; no dedicated option needed
-    # for those three. "log" (the default) just logs instead of sending.
-    provider: log
-    from: noreply@example.com
-    reply-to: ${MAIL_REPLY_TO:}
-    smtp:
-      host: ${MAIL_SMTP_HOST:}
-      port: ${MAIL_SMTP_PORT:587}
-      username: ${MAIL_SMTP_USERNAME:}
-      password: ${MAIL_SMTP_PASSWORD:}
-      auth: ${MAIL_SMTP_AUTH:true}
-      starttls: ${MAIL_SMTP_STARTTLS:true}
-    resend:
-      api-key: ${RESEND_API_KEY:}
-    sendgrid:
-      api-key: ${SENDGRID_API_KEY:}
+  # Mail gateway config (provider, SMTP/Resend/SendGrid credentials) lives in
+  # the mail_settings DB table now, editable from Settings > Mail or the setup
+  # wizard -- see MailSenderRouter. No app.mail.* keys here anymore.
   public-url: ${PUBLIC_URL:http://localhost:8080}      # used to build the confirm-subscription link
   frontend-url: ${FRONTEND_URL:http://localhost:3000}   # used to build the "read the post" digest link
 

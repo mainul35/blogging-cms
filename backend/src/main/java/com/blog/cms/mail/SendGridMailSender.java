@@ -1,50 +1,38 @@
 package com.blog.cms.mail;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
+import com.blog.cms.model.MailSettings;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@Component
-@ConditionalOnProperty(prefix = "app.mail", name = "provider", havingValue = "sendgrid")
-public class SendGridMailSender implements MailSender {
+// Not a Spring bean -- see SmtpMailSender for why (constructed per send() call
+// from the current DB-stored MailSettings by MailSenderRouter).
+public class SendGridMailSender {
 
-    private final WebClient webClient;
-    private final String from;
-    private final String defaultReplyTo;
-
-    public SendGridMailSender(@Value("${app.mail.sendgrid.api-key}") String apiKey,
-                               @Value("${app.mail.from}") String from,
-                               @Value("${app.mail.reply-to:}") String defaultReplyTo) {
-        this.webClient = WebClient.builder()
+    public static Mono<Void> send(MailMessage message, MailSettings settings) {
+        WebClient webClient = WebClient.builder()
                 .baseUrl("https://api.sendgrid.com")
-                .defaultHeader("Authorization", "Bearer " + apiKey)
+                .defaultHeader("Authorization", "Bearer " + settings.getSendgridApiKey())
                 .build();
-        this.from = from;
-        this.defaultReplyTo = defaultReplyTo;
-    }
 
-    @Override
-    public Mono<Void> send(MailMessage message) {
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(Map.of("type", "text/plain", "value", message.getText()));
         if (message.getHtml() != null) {
             content.add(Map.of("type", "text/html", "value", message.getHtml()));
         }
 
-        Map<String, Object> body = new java.util.HashMap<>(Map.of(
+        Map<String, Object> body = new HashMap<>(Map.of(
                 "personalizations", List.of(Map.of("to", List.of(Map.of("email", message.getTo())))),
-                "from", Map.of("email", from),
+                "from", Map.of("email", settings.getFromAddress()),
                 "subject", message.getSubject(),
                 "content", content
         ));
-        String replyTo = message.getReplyTo() != null ? message.getReplyTo() : defaultReplyTo;
+        String replyTo = message.getReplyTo() != null ? message.getReplyTo() : settings.getReplyTo();
         if (replyTo != null && !replyTo.isBlank()) {
             body.put("reply_to", Map.of("email", replyTo));
         }

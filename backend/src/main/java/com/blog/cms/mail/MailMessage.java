@@ -10,5 +10,5 @@ public class MailMessage {
     private String subject;
     private String text;
     private String html;     // nullable — unused today, kept for future HTML-capable providers
-    private String replyTo;  // nullable — falls back to app.mail.reply-to inside each sender
+    private String replyTo;  // nullable — falls back to the DB-stored reply-to inside each sender
 }

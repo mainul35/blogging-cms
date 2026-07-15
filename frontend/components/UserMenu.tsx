@@ -13,12 +13,21 @@ export default function UserMenu() {
   const pathname = usePathname();
 
   useEffect(() => {
-    authLib.getProfile()
-      .then(profile => {
-        setName(profile.name || profile.email);
-        setAvatarUrl(profile.avatarUrl ?? '');
-      })
-      .catch(() => {});
+    const loadProfile = () => {
+      authLib.getProfile()
+        .then(profile => {
+          setName(profile.name || profile.email);
+          setAvatarUrl(profile.avatarUrl ?? '');
+        })
+        .catch(() => {});
+    };
+    loadProfile();
+    // The Settings page's ProfileForm is a sibling client component with its
+    // own independent state -- it has no direct reference to this one, so a
+    // successful save there dispatches this event to let us know our
+    // already-fetched name/avatar are stale without a full page reload.
+    window.addEventListener('profile-updated', loadProfile);
+    return () => window.removeEventListener('profile-updated', loadProfile);
   }, []);
 
   // Close menu when clicking outside

@@ -1,5 +1,24 @@
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
+// Error responses are JSON ({ status, error, message }, see GlobalExceptionHandler) --
+// extracting .message surfaces the actual validation reason (e.g. "Image must be
+// 5MB or smaller") instead of the raw JSON blob or a generic fallback. Exported so
+// lib/upload.ts's separate fetch call (not routed through request() below) gets the
+// same treatment.
+export async function extractErrorMessage(res: Response): Promise<string> {
+  const contentType = res.headers.get('content-type') ?? '';
+  try {
+    if (contentType.includes('application/json')) {
+      const body = await res.json();
+      return typeof body?.message === 'string' ? body.message : `HTTP ${res.status}`;
+    }
+    const text = await res.text();
+    return text || `HTTP ${res.status}`;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('blog_token') : null;
@@ -18,8 +37,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (!res.ok) {
-    const message = await res.text().catch(() => `HTTP ${res.status}`);
-    throw new Error(message);
+    throw new Error(await extractErrorMessage(res));
   }
 
   if (res.status === 204) return undefined as T;

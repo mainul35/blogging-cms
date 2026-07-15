@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
@@ -21,6 +22,23 @@ public class GlobalExceptionHandler {
                         "status", 413,
                         "error", "Payload Too Large",
                         "message", "Uploaded file exceeds the maximum allowed size"
+                ));
+    }
+
+    // Without this, Spring's default WebFlux error handling drops the reason text
+    // (e.g. UploadService's "Image must be 5MB or smaller", AuthService's "Email
+    // already in use") from the JSON body entirely -- the client only ever saw
+    // {status, error, path, requestId}, so every service-layer validation error
+    // looked identical to the frontend and had to be replaced with a generic
+    // hardcoded string.
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
+        HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+        return ResponseEntity.status(status)
+                .body(Map.of(
+                        "status", status.value(),
+                        "error", status.getReasonPhrase(),
+                        "message", ex.getReason() != null ? ex.getReason() : status.getReasonPhrase()
                 ));
     }
 }

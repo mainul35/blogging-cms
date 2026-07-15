@@ -1,3 +1,5 @@
+import { extractErrorMessage } from './api';
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function uploadImage(file: File): Promise<string> {
@@ -13,8 +15,7 @@ export async function uploadImage(file: File): Promise<string> {
   });
 
   if (!res.ok) {
-    const message = await res.text().catch(() => `HTTP ${res.status}`);
-    throw new Error(message);
+    throw new Error(await extractErrorMessage(res));
   }
 
   const data: { url: string } = await res.json();

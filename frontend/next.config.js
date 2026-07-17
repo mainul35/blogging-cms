@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Produces .next/standalone -- a minimal server bundle with only the
+  // node_modules it actually needs, traced from the app's imports. Docker
+  // (frontend/Dockerfile) copies just that + .next/static + public/ into the
+  // final image instead of the full node_modules tree.
+  output: 'standalone',
   async headers() {
     return [
       {

@@ -1,0 +1,7 @@
+node_modules/
+.next/
+out/
+dev.log
+.env.local
+.idea/
+.vscode/

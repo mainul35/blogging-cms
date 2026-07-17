@@ -24,3 +24,8 @@ backend/uploads/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Deployment secrets (see docs/deployment/DEPLOYMENT.md) -- never committed
+.env
+.env.deploy
+.env.prod

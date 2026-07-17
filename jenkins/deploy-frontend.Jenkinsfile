@@ -54,9 +54,10 @@ pipeline {
                         // socket, which is what --network host reaches too.
                         def tagsRaw = sh(
                             script: '''
-                                docker run --rm --network host curlimages/curl -sf -u "$HARBOR_USER:$HARBOR_PASS" \
-                                  "http://${REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/frontend/artifacts?with_tag=true&page_size=50" \
-                                | grep -oE '"name":"[^"]+"' | cut -d'"' -f4 | sort -ru
+                                RESPONSE=$(docker run --rm --network host curlimages/curl -sf -u "$HARBOR_USER:$HARBOR_PASS" "http://${REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/frontend/artifacts?with_tag=true&page_size=50")
+                                CURL_EXIT=$?
+                                echo "Harbor query: curl exit=$CURL_EXIT, response length=${#RESPONSE}" >&2
+                                echo "$RESPONSE" | grep -oE '"name":"[^"]+"' | cut -d'"' -f4 | sort -ru
                             ''',
                             returnStdout: true
                         ).trim()

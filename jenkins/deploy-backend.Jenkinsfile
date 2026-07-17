@@ -44,9 +44,21 @@ pipeline {
                         // silently produced zero matches -- not an error the
                         // pipeline caught, just a wrong (but validly-typed)
                         // one-item choice list every time.
+                        //
+                        // The curl itself runs inside a --network host
+                        // container via the docker CLI, not directly in this
+                        // Jenkins container -- Jenkins is bridge-networked
+                        // (vsd-auth-tunnel_default), so its own "localhost"
+                        // is its own loopback, not the host's; a bare curl
+                        // here fails to connect (exit 7) to Harbor on the
+                        // host's :5000, silently, since -s suppresses the
+                        // error and the pipe hides the exit code. Docker
+                        // commands don't have this problem because they run
+                        // against the host's own daemon via the mounted
+                        // socket, which is what --network host reaches too.
                         def tagsRaw = sh(
                             script: '''
-                                curl -sf -u "$HARBOR_USER:$HARBOR_PASS" \
+                                docker run --rm --network host curlimages/curl -sf -u "$HARBOR_USER:$HARBOR_PASS" \
                                   "http://${REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/backend/artifacts?with_tag=true&page_size=50" \
                                 | grep -oE '"name":"[^"]+"' | cut -d'"' -f4 | sort -ru
                             ''',

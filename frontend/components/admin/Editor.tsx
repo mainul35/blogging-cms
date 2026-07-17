@@ -198,7 +198,7 @@ export default function Editor({ value, onChange }: EditorProps) {
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
+    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
     if (!item) return; // let normal text paste proceed
     e.preventDefault();
     const file = item.getAsFile();

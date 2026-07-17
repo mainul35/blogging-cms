@@ -1,8 +1,9 @@
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import type { PluggableList } from 'unified';
 
-export const remarkPlugins = [remarkGfm];
+export const remarkPlugins: PluggableList = [remarkGfm];
 
 // rehype-raw lets embedded raw HTML render (needed for resizable <img> tags and
 // the alignment <div> wrapper) — paired with a restricted sanitize schema so
@@ -19,4 +20,4 @@ const sanitizeSchema = {
   },
 };
 
-export const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema]];
+export const rehypePlugins: PluggableList = [rehypeRaw, [rehypeSanitize, sanitizeSchema]];

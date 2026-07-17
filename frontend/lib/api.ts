@@ -1,4 +1,13 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
+// Server Components/route handlers (e.g. getSiteSettings() in the root layout)
+// run inside this container and should reach the backend over the internal
+// docker-compose network (BACKEND_URL, same var next.config.js's rewrite
+// uses) rather than bouncing back out through the public domain. Browser code
+// has no such shortcut -- NEXT_PUBLIC_BACKEND_URL is baked into the client
+// bundle at build time and should point at the same public origin the page
+// was loaded from, so these calls stay same-origin (no CORS, no cross-site
+// auth-token handling) once both are proxied behind one edge reverse proxy.
+const SERVER_BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080';
+const CLIENT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 // Error responses are JSON ({ status, error, message }, see GlobalExceptionHandler) --
 // extracting .message surfaces the actual validation reason (e.g. "Image must be
@@ -23,7 +32,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('blog_token') : null;
 
-  const res = await fetch(`${BACKEND_URL}${path}`, {
+  const backendUrl = typeof window === 'undefined' ? SERVER_BACKEND_URL : CLIENT_BACKEND_URL;
+  const res = await fetch(`${backendUrl}${path}`, {
     // Content is admin-editable and expected to change at any time — Next.js's
     // default fetch caching (persisted to disk, surviving dev-server restarts)
     // would otherwise serve stale data indefinitely until manually cleared.

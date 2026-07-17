@@ -17,6 +17,16 @@ pipeline {
         REGISTRY       = 'localhost:5000'
         HARBOR_PROJECT = 'blogging-cms'
         COMPOSE_FILE   = 'docker-compose.prod.yml'
+        // Without this, docker compose derives the project name from the
+        // workspace directory -- which differs per Jenkins job (each gets
+        // its own workspace folder name). container_name: in the compose
+        // file is a fixed, host-wide-unique name regardless of project, so
+        // two different project namespaces both trying to manage
+        // "blog_postgres" collide. Pinning one shared name is what lets
+        // every job (this one, deploy-frontend, and a human running
+        // docker compose by hand) recognize and reuse the same stack
+        // instead of fighting over the same container names.
+        COMPOSE_PROJECT_NAME = 'blogging-cms'
     }
 
     stages {

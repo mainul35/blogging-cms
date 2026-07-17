@@ -17,6 +17,11 @@ pipeline {
         REGISTRY       = 'localhost:5000'
         HARBOR_PROJECT = 'blogging-cms'
         COMPOSE_FILE   = 'docker-compose.prod.yml'
+        // See deploy-backend.Jenkinsfile for why this is needed: container_name:
+        // in the compose file is fixed/host-wide-unique regardless of project,
+        // so every job (and a human running docker compose by hand) must agree
+        // on one COMPOSE_PROJECT_NAME or they'll fight over the same containers.
+        COMPOSE_PROJECT_NAME = 'blogging-cms'
     }
 
     stages {

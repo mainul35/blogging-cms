@@ -78,8 +78,10 @@ proxy-vm outside of Jenkins/Harbor/Docker themselves.
 
 ### 1. `harbor-robot-blogging-cms` (Username with password)
 
-A Harbor **robot account** scoped to the `blogging-cms` project (push-only
-is enough) — created in the Harbor UI, see
+A Harbor **robot account** scoped to the `blogging-cms` project, with
+**both push and pull** — the build jobs push, and the deploy jobs' tag
+picker calls Harbor's API to list existing tags (needs at least read
+access) — created in the Harbor UI, see
 [harbor-registry-setup.md](harbor-registry-setup.md). Store its account
 name as the username and its token as the password.
 
@@ -137,37 +139,49 @@ manager — never commit it).
 
 ## Jenkins job setup (one-time)
 
-1. **Manage Jenkins → Credentials** — add the two credentials above.
-2. **New Item → Pipeline**, name it `blogging-cms-deploy`.
-3. Pipeline definition: **Pipeline script from SCM** → Git → this repo's URL
-   → branch `main` → script path `Jenkinsfile`.
-4. Save, then **Build Now** for the first run.
+Four jobs, grouped under one **Folder** named `blog.mainul35.dev` — build
+and deploy are separate concerns per service, so a deploy never triggers a
+rebuild and a build never touches the running app:
 
-The `Jenkinsfile` at the repo root does everything from there: checks
-postgres/redis are up (starting them if not), builds the backend and
-frontend images, pushes both to Harbor, deploys via
-`docker-compose.prod.yml`, and smoke-tests the result through the edge
-proxy. Re-running the job is the release process — there's no separate
-"release" step.
+| Job | Jenkinsfile | What it does |
+|---|---|---|
+| `build-backend` | `jenkins/build-backend.Jenkinsfile` | Checkout → build backend image → push to Harbor (tagged with the short git SHA, plus `latest`) |
+| `build-frontend` | `jenkins/build-frontend.Jenkinsfile` | Same, for the frontend image |
+| `deploy-backend` | `jenkins/deploy-backend.Jenkinsfile` | Checkout → **pause and let you pick a tag** from Harbor's actual tag list for `blogging-cms/backend` → dependency health check → pull + deploy *only* the backend container with that tag → smoke test |
+| `deploy-frontend` | `jenkins/deploy-frontend.Jenkinsfile` | Same, for the frontend container |
+
+The deploy jobs' tag picker is a plain Jenkins `input` step (no extra
+plugin) — it queries Harbor's API for the repository's current tags via
+`curl`/`grep` and pauses the pipeline with a dropdown of whatever it found,
+newest first. This is also how you pick which image is currently live —
+there's no separate "which version is deployed" tracking beyond whichever
+tag you last selected.
+
+Setup, once:
+
+1. **Manage Jenkins → Credentials** — add the two credentials above (needed by both build and deploy jobs).
+2. **New Item → Folder**, name it `blog.mainul35.dev`.
+3. Inside that folder, **New Item → Pipeline** four times, one per job name above.
+4. For each: Pipeline definition → **Pipeline script from SCM** → Git → this repo's URL → branch `main` → script path set to that job's Jenkinsfile from the table above.
+5. Save.
+
+First release: run `build-backend` and `build-frontend` (produces the
+first images in Harbor), then run `deploy-backend` and `deploy-frontend`
+(each pauses on its tag picker — pick the tag the build job just pushed).
 
 ## Rollback
 
-Every build tags images with the short git SHA (`IMAGE_TAG`), and Jenkins
-keeps the last 20 builds' logs (`buildDiscarder`) so you can find the
-previous good SHA. To roll back:
+Every build tags images with the short git SHA, and Harbor keeps every
+tag ever pushed (until a retention policy prunes it — see
+[harbor-registry-setup.md](harbor-registry-setup.md#maintenance)). To roll
+back, there's no separate procedure — just re-run `deploy-backend` and/or
+`deploy-frontend`, and pick the previous good SHA from the tag picker
+instead of the latest one.
 
-```bash
-ssh proxy-vm
-cd <jenkins-workspace-for-blogging-cms-deploy>   # or wherever docker-compose.prod.yml lives
-export IMAGE_TAG=<previous-good-sha>
-docker compose --env-file <path-to-prod.env> -f docker-compose.prod.yml \
-  up -d --no-deps backend frontend
-```
-
-Postgres/redis are untouched by a rollback — only the app images change.
-If a Flyway migration shipped in the bad build already ran, a code-only
-rollback won't undo the schema change; that needs a manual Flyway
-`undo`/manual fix, same as any other Flyway-based project.
+Postgres/redis are untouched by any deploy — only the one app container
+being deployed changes. If a Flyway migration shipped in the bad build
+already ran, a code-only rollback won't undo the schema change; that needs
+a manual Flyway `undo`/manual fix, same as any other Flyway-based project.
 
 ## Day-2 notes
 

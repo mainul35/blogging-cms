@@ -19,8 +19,9 @@ this order:
 1. **Fix Jenkins** — [DEPLOYMENT.md § Jenkins container troubleshooting](DEPLOYMENT.md#jenkins-container-troubleshooting) (it was reported unhealthy; nothing else here can run until it's up).
 2. **Deploy Harbor** — [harbor-registry-setup.md](harbor-registry-setup.md). Needed before the pipeline can push images anywhere.
 3. **Set up Cloudflare Tunnel** — [cloudflare-tunnel-setup.md](cloudflare-tunnel-setup.md). Needed to know your real `PUBLIC_DOMAIN` before building the frontend image (it's baked in at build time).
-4. **Configure Jenkins credentials + job** — [DEPLOYMENT.md § Required secrets](DEPLOYMENT.md#required-secrets--environment-variables) and [§ Jenkins job setup](DEPLOYMENT.md#jenkins-job-setup-one-time).
-5. **Run the pipeline** — first `Build Now` does checkout, dependency health-check, image build, Harbor push, deploy, and smoke test in one go.
+4. **Configure Jenkins credentials + the 4 jobs** — [DEPLOYMENT.md § Required secrets](DEPLOYMENT.md#required-secrets--environment-variables) and [§ Jenkins job setup](DEPLOYMENT.md#jenkins-job-setup-one-time). All four live under one Folder, `blog.mainul35.dev`.
+5. **Build, then deploy** — run `build-backend`/`build-frontend` first (pushes images to Harbor), then `deploy-backend`/`deploy-frontend` (each pauses on a tag picker pulled live from Harbor — pick what you just built).
 
-After that, redeploying (a new feature, a fix, a config change) is just
-re-running the same Jenkins job — there's no separate "release" step.
+After that, releasing a change is: re-run the relevant build job, then the
+matching deploy job and pick the new tag. Rolling back is the same deploy
+job, picking an older tag instead.

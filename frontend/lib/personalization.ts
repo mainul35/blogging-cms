@@ -46,13 +46,32 @@ export const ACCENT_SHADES: Record<AccentColor, { 50: string; 500: string; 600: 
   pink:   { 50: '#fdf2f8', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d' },
 };
 
+// The 600/700/800 shades above read fine as *button fills* on a dark page
+// (they're always paired with white text, so contrast comes from the fill
+// itself) but recede when used as *text directly on the dark background* --
+// a dark saturated blue on dark navy just looks muted rather than like a
+// highlight. text/textHover are a lighter tint of the same hue (Tailwind's
+// own 400/300 steps), used only for on-dark text color -- see the
+// [data-theme='dark'] overrides in globals.css.
+export const ACCENT_DARK_TEXT: Record<AccentColor, { text: string; textHover: string }> = {
+  blue:   { text: '#60a5fa', textHover: '#93c5fd' },
+  green:  { text: '#4ade80', textHover: '#86efac' },
+  purple: { text: '#c084fc', textHover: '#d8b4fe' },
+  red:    { text: '#f87171', textHover: '#fca5a5' },
+  orange: { text: '#fb923c', textHover: '#fdba74' },
+  pink:   { text: '#f472b6', textHover: '#f9a8d4' },
+};
+
 export function accentCssVars(accent: AccentColor): Record<string, string> {
   const shades = ACCENT_SHADES[accent] ?? ACCENT_SHADES.blue;
+  const darkText = ACCENT_DARK_TEXT[accent] ?? ACCENT_DARK_TEXT.blue;
   return {
     '--accent-50': shades[50],
     '--accent-500': shades[500],
     '--accent-600': shades[600],
     '--accent-700': shades[700],
     '--accent-800': shades[800],
+    '--accent-text-dark': darkText.text,
+    '--accent-text-dark-hover': darkText.textHover,
   };
 }

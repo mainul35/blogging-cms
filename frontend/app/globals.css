@@ -61,6 +61,23 @@ a {
 [data-theme='dark'] .bg-red-50 { background-color: rgba(239, 68, 68, 0.12); }
 [data-theme='dark'] .shadow-sm { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
 
+/* Accent as *text* (post titles, the site logo, nav hover, @mentions) needs a
+   lighter tint on a dark background than it does on white -- the 600/700/800
+   shades above are tuned for light backgrounds and read as muted rather than
+   as a highlight once the page itself goes dark. Button/pill fills
+   (.bg-blue-600 etc.) are untouched: they're always paired with white text,
+   so their contrast comes from the fill, not from the hue's own luminance. */
+[data-theme='dark'] a,
+[data-theme='dark'] .text-blue-600,
+[data-theme='dark'] .text-blue-700,
+[data-theme='dark'] .text-blue-800 {
+  color: var(--accent-text-dark, #60a5fa);
+}
+[data-theme='dark'] .hover\:text-blue-700:hover,
+[data-theme='dark'] .hover\:text-blue-800:hover {
+  color: var(--accent-text-dark-hover, #93c5fd);
+}
+
 /* Same problem as the form-control fix below, different trigger: these are
    the hover-state variants of the light-mode surface/text classes above.
    Missing them meant every hoverable row/nav-item/icon-button (sidebar nav,

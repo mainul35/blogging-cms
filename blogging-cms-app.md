@@ -281,6 +281,8 @@ Set from **Settings > Personalization**, stored in `site_settings` (V12: `theme`
 
 `theme: 'system'` resolves client-side via a plain inline `<script>` (not `next/script` — that produced hydration errors when placed anywhere in this root layout) that checks `prefers-color-scheme` and flips `data-theme` before paint; `<html>` has `suppressHydrationWarning` since a dark-preferring visitor's client mutation legitimately differs from the server's safe-default guess.
 
+**Reader-level theme override**: `ThemeToggle` (in the shared header, every page) lets any visitor pick their own light/dark mode independent of the site owner's Settings > Personalization choice — stored client-side only (`localStorage['reader-theme']`, no reader account needed) and applied instantly by mutating `data-theme` directly. The same inline script that resolves `system` also checks this override first on every page load (a stored override always wins over the site's own setting; only when there isn't one does `system` get resolved against the visitor's OS preference) — `data-site-theme` on `<html>` carries the raw, unresolved site setting so the script can tell the two cases apart.
+
 ## Known Pre-Existing Bugs Fixed (worth knowing if something looks newly broken)
 
 These were latent since the original build, found incidentally while working on unrelated features:

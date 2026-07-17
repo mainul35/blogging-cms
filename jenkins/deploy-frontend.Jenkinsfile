@@ -34,11 +34,17 @@ pipeline {
                     passwordVariable: 'HARBOR_PASS'
                 )]) {
                     script {
+                        // -E/cut instead of -P: PCRE's \K needs a UTF-8 locale
+                        // that this Jenkins environment doesn't have ("grep -P
+                        // supports only unibyte and UTF-8 locales"), which
+                        // silently produced zero matches -- not an error the
+                        // pipeline caught, just a wrong (but validly-typed)
+                        // one-item choice list every time.
                         def tagsRaw = sh(
                             script: '''
                                 curl -sf -u "$HARBOR_USER:$HARBOR_PASS" \
                                   "http://${REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/frontend/artifacts?with_tag=true&page_size=50" \
-                                | grep -oP '"name":"\\K[^"]+' | sort -ru
+                                | grep -oE '"name":"[^"]+"' | cut -d'"' -f4 | sort -ru
                             ''',
                             returnStdout: true
                         ).trim()

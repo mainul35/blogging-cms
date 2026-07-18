@@ -158,8 +158,15 @@ pipeline {
                     # -- same reason the tag-picker's curl needed --network
                     # host. Checking from inside the target container itself
                     # sidesteps host networking entirely.
+                    #
+                    # 127.0.0.1, not localhost: busybox wget resolves
+                    # "localhost" to ::1 first, and Next's server only binds
+                    # the IPv4 wildcard -- confirmed directly against the
+                    # first deploy-frontend run (127.0.0.1 succeeds, localhost
+                    # gets "Connection refused"). See docker-compose.prod.yml's
+                    # frontend healthcheck for the same fix.
                     for i in $(seq 1 20); do
-                      if docker exec blog_frontend wget -qO- http://localhost:3000/ >/dev/null 2>&1; then
+                      if docker exec blog_frontend wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; then
                         echo "Frontend (tag ${SELECTED_TAG}) is responding"
                         break
                       fi

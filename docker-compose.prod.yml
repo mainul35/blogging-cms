@@ -107,7 +107,14 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     networks: [blogcms]
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000']
+      # 127.0.0.1, not localhost: busybox wget resolves "localhost" to ::1
+      # first, and Next's server only binds the IPv4 wildcard -- confirmed
+      # directly (wget to 127.0.0.1 succeeds, wget to localhost gets
+      # "Connection refused") while chasing deploy-frontend's first-ever
+      # failed smoke test. The backend's own healthcheck uses "localhost"
+      # and works fine, since Spring/Netty binds dual-stack -- this is
+      # specific to Next's server, not a generic container-networking issue.
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000']
       interval: 15s
       timeout: 5s
       retries: 5

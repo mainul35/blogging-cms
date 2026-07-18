@@ -23,8 +23,18 @@ spring:
 
   webflux:
     multipart:
-      max-in-memory-size: 1MB
-      max-disk-usage-per-part: 5MB   # hard backstop — keep >= app.upload.max-size-mb below
+      # No synchronoss-nio-multipart dependency on the classpath, so Spring
+      # Boot falls back to DefaultPartHttpMessageReader -- which has no
+      # disk-spill support at all. max-disk-usage-per-part only applies to
+      # the Synchronoss-based reader, so setting it here was a silent no-op;
+      # max-in-memory-size was the *only* real cap, and at 1MB it rejected
+      # any upload above that with a DataBufferLimitException before
+      # UploadService's own 5MB check (app.upload.max-size-mb below) ever
+      # ran -- most real photos are well over 1MB, so avatar uploads were
+      # failing outright. Raised to comfortably exceed the app's actual
+      # intended limit; holding a few MB per upload in memory is trivial at
+      # this app's scale.
+      max-in-memory-size: 6MB
 
 app:
   cors:

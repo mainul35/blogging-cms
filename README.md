@@ -32,4 +32,4 @@ Copy `frontend/.env.example` to `frontend/.env.local` and adjust if needed — a
 
 ## Production deployment
 
-This repo doesn't include production deployment tooling (CI/CD pipeline, reverse proxy, registry setup) — that's operator-specific infrastructure, documented separately by whoever runs the deployment. `docker-compose.prod.yml` in this repo is the production container definition (backend + frontend + Postgres + Redis), parameterized by environment variables — see the file itself for what it expects.
+This repo doesn't include production deployment tooling — no CI/CD pipeline, no production compose file, no registry setup. That's operator-specific infrastructure, kept in a separate `blogging-cms-ops` repo and documented separately by whoever runs the deployment.

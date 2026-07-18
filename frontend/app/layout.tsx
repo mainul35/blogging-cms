@@ -1,5 +1,14 @@
 import type { Metadata } from 'next';
-import { Inter, Merriweather, JetBrains_Mono } from 'next/font/google';
+// Self-hosted via npm instead of next/font/google: that fetches font CSS/files
+// from Google at build time, which this deploy environment can only reach
+// unreliably (works some builds, times out on others -- see
+// frontend/Dockerfile's NODE_OPTIONS comment for the DNS half of this same
+// story). @fontsource ships the actual font files as npm package assets, so
+// `npm ci` is the only network dependency, same as every other dependency.
+import '@fontsource-variable/inter';
+import '@fontsource/merriweather/400.css';
+import '@fontsource/merriweather/700.css';
+import '@fontsource-variable/jetbrains-mono';
 import { cookies } from 'next/headers';
 import { getSiteSettings } from '@/lib/settings';
 import { accentCssVars, type Font } from '@/lib/personalization';
@@ -8,14 +17,12 @@ import UserMenu from '@/components/UserMenu';
 import ThemeToggle from '@/components/ThemeToggle';
 import ReaderSessionProvider from '@/components/ReaderSessionProvider';
 
-const inter = Inter({ subsets: ['latin'] });
-const merriweather = Merriweather({ subsets: ['latin'], weight: ['400', '700'] });
-const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'] });
-
+// Family names as declared by each @fontsource package's own CSS -- not
+// arbitrary, must match exactly (`grep font-family node_modules/@fontsource*/.../index.css`).
 const FONT_FAMILY_MAP: Record<Font, string> = {
-  inter: inter.style.fontFamily,
-  serif: merriweather.style.fontFamily,
-  mono: jetbrainsMono.style.fontFamily,
+  inter: "'Inter Variable', sans-serif",
+  serif: "'Merriweather', serif",
+  mono: "'JetBrains Mono Variable', monospace",
 };
 
 export async function generateMetadata(): Promise<Metadata> {

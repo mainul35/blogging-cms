@@ -41,7 +41,7 @@ services:
       retries: 5
 
   backend:
-    image: ${REGISTRY:-harbor.proxy-vm.local:8443}/${HARBOR_PROJECT:-blogging-cms}/backend:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-localhost:5000}/${HARBOR_PROJECT:-blogging-cms}/backend:${IMAGE_TAG:-latest}
     build:
       context: ./backend
     container_name: blog_backend
@@ -83,12 +83,12 @@ services:
       start_period: 30s
 
   frontend:
-    image: ${REGISTRY:-harbor.proxy-vm.local:8443}/${HARBOR_PROJECT:-blogging-cms}/frontend:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-localhost:5000}/${HARBOR_PROJECT:-blogging-cms}/frontend:${IMAGE_TAG:-latest}
     build:
       context: ./frontend
       args:
         BACKEND_URL: http://backend:8080
-        # Must match the public origin edge.conf serves this app on -- baked
+        # Must match the public origin this container is reached on -- baked
         # into the client JS at build time, can't be overridden at container
         # runtime. Changing PUBLIC_DOMAIN always requires a frontend rebuild.
         NEXT_PUBLIC_BACKEND_URL: https://${PUBLIC_DOMAIN}
@@ -105,6 +105,16 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+    ports:
+      # This container IS the public entry point -- no separate reverse
+      # proxy. next.config.js's own rewrite already forwards /api/* to the
+      # backend server-side (see lib/api.ts's server/client BACKEND_URL
+      # split), so a dedicated nginx layer in front would be redundant.
+      # Loopback-only: Cloudflare Tunnel's cloudflared reaches this over
+      # 127.0.0.1 (see docs/deployment/cloudflare-tunnel-setup.md); binding
+      # 0.0.0.0 would let anyone reaching proxy-vm's real IP skip the tunnel
+      # entirely. Port 2368 replaces the Ghost blog this app supersedes.
+      - '127.0.0.1:2368:3000'
     networks: [blogcms]
     healthcheck:
       # 127.0.0.1, not localhost: busybox wget resolves "localhost" to ::1
@@ -119,23 +129,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-
-  edge:
-    image: nginx:1.27-alpine
-    container_name: blog_edge
-    restart: unless-stopped
-    depends_on:
-      frontend: { condition: service_healthy }
-    ports:
-      # Loopback-only: cloudflared is the sole public ingress (see
-      # docs/deployment/cloudflare-tunnel-setup.md) and reaches this over
-      # 127.0.0.1, not the VM's public/LAN interface. Binding to 0.0.0.0
-      # here would let anyone who can reach proxy-vm's real IP skip the
-      # tunnel entirely and hit the app directly, unencrypted, on port 80.
-      - '127.0.0.1:80:80'
-    volumes:
-      - ./deploy/nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
-    networks: [blogcms]
 
 networks:
   blogcms:

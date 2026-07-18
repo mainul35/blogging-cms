@@ -3,6 +3,7 @@ package com.blog.cms.service;
 import com.blog.cms.dto.AuthRequest;
 import com.blog.cms.dto.AuthResponse;
 import com.blog.cms.dto.ChangePasswordRequest;
+import com.blog.cms.dto.EmergencyResetResponse;
 import com.blog.cms.dto.ProfileResponse;
 import com.blog.cms.dto.UpdateProfileRequest;
 import com.blog.cms.mail.MailMessage;
@@ -23,8 +24,10 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
 
@@ -40,6 +43,9 @@ public class AuthService {
             "Password reset via email isn't set up for this site yet. Contact the site administrator.";
     private static final int FORGOT_PASSWORD_MAX_REQUESTS = 5;
     private static final Duration FORGOT_PASSWORD_RATE_WINDOW = Duration.ofMinutes(15);
+    private static final int EMERGENCY_RESET_MAX_REQUESTS = 5;
+    private static final Duration EMERGENCY_RESET_RATE_WINDOW = Duration.ofHours(1);
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -47,12 +53,6 @@ public class AuthService {
     private final MailSender mailSender;
     private final ReactiveRedisTemplate<String, Object> redisTemplate;
     private final MailSettingsService mailSettingsService;
-
-    @Value("${app.admin.default-email}")
-    private String defaultAdminEmail;
-
-    @Value("${app.admin.default-password}")
-    private String defaultAdminPassword;
 
     @Value("${app.admin.reset-secret}")
     private String resetSecret;
@@ -217,19 +217,62 @@ public class AuthService {
                 });
     }
 
-    // Keyed by role, not by the default email, since the admin can change their
-    // email via updateProfile — this must still find the account if they did.
-    public Mono<Void> resetAdminToDefault(String providedSecret) {
+    // Keyed by role, not by email, since the admin can change their email via
+    // updateProfile — this must still find the account if they did. Email is
+    // deliberately left untouched (no reason to reset it just to recover a
+    // password, and doing so used to silently overwrite a real custom email
+    // with a hardcoded placeholder).
+    //
+    // Generates a fresh random password on every call rather than resetting to
+    // a fixed default — a hardcoded default (previously admin@blog.com /
+    // Admin@1234, both plainly readable in this repo's own application.yml)
+    // meant that anyone who ever obtained ADMIN_RESET_SECRET — e.g. via
+    // another leak like the one already documented in the Troubleshooting &
+    // Incident Log — would know the resulting login outright, with nothing
+    // left to guess. A random password means the secret alone isn't enough;
+    // the caller only learns the new password because this response returns
+    // it directly to them, once, over the same authenticated call.
+    public Mono<EmergencyResetResponse> resetAdminToDefault(String providedSecret) {
         if (providedSecret == null || !resetSecret.equals(providedSecret)) {
             return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Invalid reset key"));
         }
-        return userRepository.findFirstByRole("ADMIN")
-                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin account not found")))
-                .flatMap(user -> {
-                    user.setEmail(defaultAdminEmail);
-                    user.setPassword(passwordEncoder.encode(defaultAdminPassword));
-                    return userRepository.save(user);
-                })
-                .then();
+        return isWithinEmergencyResetRateLimit()
+                .flatMap(allowed -> {
+                    if (!allowed) {
+                        return Mono.error(new ResponseStatusException(
+                                HttpStatus.TOO_MANY_REQUESTS, "Too many reset attempts — try again later"));
+                    }
+                    String newPassword = generateRandomPassword();
+                    return userRepository.findFirstByRole("ADMIN")
+                            .switchIfEmpty(Mono.error(new ResponseStatusException(
+                                    HttpStatus.NOT_FOUND, "Admin account not found")))
+                            .flatMap(user -> {
+                                user.setPassword(passwordEncoder.encode(newPassword));
+                                return userRepository.save(user);
+                            })
+                            .doOnNext(user -> log.warn("Emergency admin reset invoked — password rotated for {}", user.getEmail()))
+                            .map(user -> new EmergencyResetResponse(user.getEmail(), newPassword));
+                });
+    }
+
+    private Mono<Boolean> isWithinEmergencyResetRateLimit() {
+        String key = "emergency-reset-rate";
+        return redisTemplate.opsForValue().increment(key)
+                .flatMap(count -> count == 1
+                        ? redisTemplate.expire(key, EMERGENCY_RESET_RATE_WINDOW).thenReturn(true)
+                        : Mono.just(count <= EMERGENCY_RESET_MAX_REQUESTS))
+                // Fail open on Redis errors, same reasoning as the forgot-password
+                // limiter — an infra hiccup shouldn't lock out a legitimate,
+                // already-secret-holding recovery attempt.
+                .onErrorResume(e -> {
+                    log.warn("Rate-limit check failed for emergency-reset, allowing request: {}", e.getMessage());
+                    return Mono.just(true);
+                });
+    }
+
+    private String generateRandomPassword() {
+        byte[] bytes = new byte[16];
+        SECURE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }

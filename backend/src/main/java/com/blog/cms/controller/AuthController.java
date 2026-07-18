@@ -2,6 +2,7 @@ package com.blog.cms.controller;
 
 import com.blog.cms.dto.AuthRequest;
 import com.blog.cms.dto.AuthResponse;
+import com.blog.cms.dto.EmergencyResetResponse;
 import com.blog.cms.dto.ForgotPasswordRequest;
 import com.blog.cms.dto.ResetPasswordRequest;
 import com.blog.cms.service.AuthService;
@@ -36,12 +37,14 @@ public class AuthController {
         return authService.resetPassword(request.getToken(), request.getNewPassword());
     }
 
-    // Not linked from the frontend. Recovers the admin account to its default
-    // credentials when the password has been forgotten — gated by a shared
-    // secret (app.admin.reset-secret / ADMIN_RESET_SECRET env var), not by login.
+    // Not linked from the frontend. Recovers the admin account when the
+    // password has been forgotten — gated by a shared secret
+    // (app.admin.reset-secret / ADMIN_RESET_SECRET env var), not by login.
+    // Rotates the password to a freshly generated random value and returns it
+    // here, once — see AuthService.resetAdminToDefault for why a fixed
+    // default password is deliberately not used.
     @PostMapping("/emergency-reset")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public Mono<Void> emergencyReset(@RequestHeader(value = "X-Admin-Reset-Secret", required = false) String secret) {
+    public Mono<EmergencyResetResponse> emergencyReset(@RequestHeader(value = "X-Admin-Reset-Secret", required = false) String secret) {
         return authService.resetAdminToDefault(secret);
     }
 }

@@ -35,8 +35,6 @@ app:
     secret: change-this-to-a-very-long-random-secret-key-at-least-256-bits-long
     expiration-ms: 86400000   # 24 hours
   admin:
-    default-email: admin@blog.com
-    default-password: Admin@1234        # only used by /api/auth/emergency-reset
     reset-secret: ${ADMIN_RESET_SECRET:change-this-emergency-reset-secret}
   upload:
     dir: ./uploads

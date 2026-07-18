@@ -117,7 +117,12 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'blogging-cms-prod-env', variable: 'ENV_FILE')]) {
                     sh '''
-                        cp "$ENV_FILE" .env.deploy
+                        set -e
+                        # See deploy-backend.Jenkinsfile's identical stage for why
+                        # this uses `cat >` + explicit chmod instead of `cp`.
+                        rm -f .env.deploy
+                        cat "$ENV_FILE" > .env.deploy
+                        chmod 600 .env.deploy
                         echo "IMAGE_TAG=${SELECTED_TAG}" >> .env.deploy
                         echo "REGISTRY=${REGISTRY}" >> .env.deploy
                         echo "HARBOR_PROJECT=${HARBOR_PROJECT}" >> .env.deploy

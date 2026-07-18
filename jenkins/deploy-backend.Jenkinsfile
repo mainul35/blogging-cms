@@ -121,7 +121,22 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'blogging-cms-prod-env', variable: 'ENV_FILE')]) {
                     sh '''
-                        cp "$ENV_FILE" .env.deploy
+                        set -e
+                        # `cp` preserves the source file's permission bits -- and
+                        # withCredentials' secret-file copy is chmod 0400 (read-only,
+                        # even for its own owner), which `cp` would carry straight
+                        # onto .env.deploy. That silently broke a later run: the
+                        # subsequent `>>` appends failed, and because this stage had
+                        # no `set -e` back then, execution carried on anyway and the
+                        # trailing `rm -f` never got a chance to run (build aborted
+                        # first) -- leaving a stale 0400 file that blocked every
+                        # later build at this exact line. `cat >` instead of `cp`
+                        # gets a fresh, normally-permissioned file from the shell
+                        # itself; the leading rm -f and explicit chmod are belt and
+                        # suspenders against the same failure mode recurring.
+                        rm -f .env.deploy
+                        cat "$ENV_FILE" > .env.deploy
+                        chmod 600 .env.deploy
                         echo "IMAGE_TAG=${SELECTED_TAG}" >> .env.deploy
                         echo "REGISTRY=${REGISTRY}" >> .env.deploy
                         echo "HARBOR_PROJECT=${HARBOR_PROJECT}" >> .env.deploy

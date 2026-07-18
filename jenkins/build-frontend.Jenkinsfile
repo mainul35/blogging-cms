@@ -37,9 +37,19 @@ pipeline {
                 // public origin this app is reached on.
                 withCredentials([file(credentialsId: 'blogging-cms-prod-env', variable: 'ENV_FILE')]) {
                     sh '''
-                        set -a
-                        . "$ENV_FILE"
-                        set +a
+                        set -e
+                        # Only PUBLIC_DOMAIN is actually needed here -- sourcing
+                        # the whole file (`set -a; . "$ENV_FILE"`) used to export
+                        # every var in it, and Jenkins' sh step traces each line
+                        # it executes (the "+ ..." prefixes), which dumped every
+                        # secret in the prod .env -- DB_PASSWORD, JWT_SECRET,
+                        # ADMIN_RESET_SECRET, INTERNAL_AUTH_SECRET, NEXTAUTH_SECRET
+                        # -- in plaintext into the console log on every build.
+                        # withCredentials only masks the literal $ENV_FILE path/
+                        # blob, not values later split out of it, so none of that
+                        # got redacted. Extracting just the one line we need
+                        # never puts anything else in the trace at all.
+                        PUBLIC_DOMAIN=$(grep '^PUBLIC_DOMAIN=' "$ENV_FILE" | cut -d= -f2-)
                         docker build \
                           --build-arg BACKEND_URL=http://backend:8080 \
                           --build-arg NEXT_PUBLIC_BACKEND_URL=https://${PUBLIC_DOMAIN} \

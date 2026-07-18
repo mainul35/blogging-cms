@@ -115,7 +115,14 @@ pipeline {
 
         stage('Deploy selected image') {
             steps {
-                withCredentials([file(credentialsId: 'blogging-cms-prod-env', variable: 'ENV_FILE')]) {
+                withCredentials([
+                    file(credentialsId: 'blogging-cms-prod-env', variable: 'ENV_FILE'),
+                    usernamePassword(
+                        credentialsId: 'harbor-robot-blogging-cms',
+                        usernameVariable: 'HARBOR_USER',
+                        passwordVariable: 'HARBOR_PASS'
+                    )
+                ]) {
                     sh '''
                         set -e
                         # See deploy-backend.Jenkinsfile's identical stage for why
@@ -127,8 +134,14 @@ pipeline {
                         echo "REGISTRY=${REGISTRY}" >> .env.deploy
                         echo "HARBOR_PROJECT=${HARBOR_PROJECT}" >> .env.deploy
 
+                        # The tag-picker stage only used these creds to query
+                        # Harbor's REST API -- `docker compose pull` needs its
+                        # own login against the host docker daemon, or it 401s
+                        # with "no basic auth credentials".
+                        echo "$HARBOR_PASS" | docker login ${REGISTRY} -u "$HARBOR_USER" --password-stdin
                         docker compose --env-file .env.deploy -f ${COMPOSE_FILE} pull frontend
                         docker compose --env-file .env.deploy -f ${COMPOSE_FILE} up -d --no-deps frontend
+                        docker logout ${REGISTRY}
 
                         rm -f .env.deploy
                     '''

@@ -29,8 +29,24 @@ public final class MediumArticleConverter {
 
     private static final String MIRO_BASE = "https://miro.medium.com/max/1400/";
     private static final Pattern POST_ID_PATTERN = Pattern.compile("-([0-9a-f]{6,})/?$");
+    // Matches Chrome/Edge DevTools' "Copy as fetch" output, e.g.
+    // fetch("https://example.com", {"headers": {...}, ...}); -- an admin
+    // pasting that whole snippet (a very natural thing to do, since "Copy as
+    // fetch" is what shows up right next to "Copy URL" in the Network tab's
+    // context menu) would otherwise just get a generic "invalid URL" error.
+    private static final Pattern FETCH_SNIPPET_PATTERN =
+            Pattern.compile("^\\s*fetch\\(\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
 
     private MediumArticleConverter() {
+    }
+
+    // Accepts either a bare URL or a full `fetch("URL", {...})` snippet
+    // copied from DevTools and returns just the URL either way.
+    public static String normalizeFetchUrl(String input) {
+        if (input == null) return null;
+        String trimmed = input.trim();
+        Matcher m = FETCH_SNIPPET_PATTERN.matcher(trimmed);
+        return m.find() ? m.group(1) : trimmed;
     }
 
     // Locates the `window.__APOLLO_STATE__ = {...};` assignment in the page

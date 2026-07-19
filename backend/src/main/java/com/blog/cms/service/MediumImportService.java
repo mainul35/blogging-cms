@@ -79,9 +79,10 @@ public class MediumImportService {
     // not a substring/contains check, to reject suffix-spoofing hosts like
     // medium.com.evil.com.
     private URI validateFetchUrl(String rawUrl) {
+        String normalized = MediumArticleConverter.normalizeFetchUrl(rawUrl);
         URI uri;
         try {
-            uri = URI.create(rawUrl);
+            uri = URI.create(normalized);
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid fetch URL");
         }

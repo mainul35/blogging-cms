@@ -90,6 +90,41 @@ class MediumArticleConverterTest {
     }
 
     @Test
+    void normalizeFetchUrl_passesThroughABareUrlUnchanged() {
+        assertThat(MediumArticleConverter.normalizeFetchUrl("https://mainul35.medium.com/a-title-d6aa51936735"))
+                .isEqualTo("https://mainul35.medium.com/a-title-d6aa51936735");
+    }
+
+    @Test
+    void normalizeFetchUrl_extractsUrlFromDevToolsCopyAsFetchSnippet() {
+        // A trimmed-down version of what Chrome/Edge DevTools' "Copy as fetch"
+        // context-menu option actually produces -- the real trigger for this:
+        // an admin pasted exactly this shape and got a generic "Invalid fetch
+        // URL" error, since the raw string starts with `fetch("` rather than
+        // being a bare URL.
+        String snippet = """
+                fetch("https://mainul35.medium.com/a-title-d6aa51936735", {
+                  "headers": {
+                    "accept": "text/html,application/xhtml+xml",
+                    "sec-fetch-dest": "document"
+                  },
+                  "body": null,
+                  "method": "GET",
+                  "mode": "cors",
+                  "credentials": "include"
+                });""";
+
+        assertThat(MediumArticleConverter.normalizeFetchUrl(snippet))
+                .isEqualTo("https://mainul35.medium.com/a-title-d6aa51936735");
+    }
+
+    @Test
+    void normalizeFetchUrl_handlesSingleQuotesAndLeadingWhitespace() {
+        assertThat(MediumArticleConverter.normalizeFetchUrl("  fetch('https://medium.com/@x/y-abc123', {})"))
+                .isEqualTo("https://medium.com/@x/y-abc123");
+    }
+
+    @Test
     void findPost_resolvesByIdAndThrowsWhenMissing() throws Exception {
         JsonNode state = parseFixtureState();
         JsonNode post = MediumArticleConverter.findPost(state, POST_ID);

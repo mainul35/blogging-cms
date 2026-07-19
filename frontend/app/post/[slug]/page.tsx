@@ -31,6 +31,8 @@ export default async function PostPage({ params }: { params: { slug: string } })
           ← Back to Blog
         </Link>
 
+        <h1 className="text-4xl font-bold mb-3">{post.title}</h1>
+
         {post.coverImageUrl && (
           <img
             src={post.coverImageUrl}
@@ -38,8 +40,6 @@ export default async function PostPage({ params }: { params: { slug: string } })
             className="w-full h-64 object-cover rounded-xl mb-8"
           />
         )}
-
-        <h1 className="text-4xl font-bold mb-3">{post.title}</h1>
 
         <p className="text-sm text-gray-400 mb-8">
           {post.publishedAt ? formatDate(post.publishedAt) : formatDate(post.createdAt)}

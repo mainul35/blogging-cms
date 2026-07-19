@@ -161,7 +161,8 @@ public class MediumImportService {
         JsonNode paragraphRefs = content.path("bodyModel").path("paragraphs");
         List<JsonNode> resolvedParagraphs = MediumArticleConverter.resolveParagraphRefs(
                 paragraphRefs, apolloState, warnings);
-        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(resolvedParagraphs, warnings);
+        List<ParagraphBlock> blocks = MediumArticleConverter.stripDuplicateTitleAndCover(
+                MediumArticleConverter.parseParagraphs(resolvedParagraphs, warnings), title, previewImageId);
 
         AtomicInteger imagesImported = new AtomicInteger();
         AtomicInteger imagesFailed = new AtomicInteger();

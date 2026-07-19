@@ -125,6 +125,57 @@ class MediumArticleConverterTest {
     }
 
     @Test
+    void stripDuplicateTitleAndCover_removesLeadingHeadingMatchingTitleAndTheImageMatchingPreviewImage() {
+        // Mirrors a real article's shape: the body's first paragraph is a
+        // heading repeating the title verbatim, and the first inline image
+        // is the same asset as the post's own previewImage.
+        List<ParagraphBlock> blocks = List.of(
+                new ParagraphBlock("H3", "My Article Title", null, null, null),
+                new ParagraphBlock("IMG", null, "1*cover.png", null, null),
+                new ParagraphBlock("P", "Real body text.", null, null, null));
+
+        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleAndCover(
+                blocks, "My Article Title", "1*cover.png");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).type()).isEqualTo("P");
+    }
+
+    @Test
+    void stripDuplicateTitleAndCover_keepsHeadingThatOnlyResemblesTheTitle() {
+        List<ParagraphBlock> blocks = List.of(
+                new ParagraphBlock("H3", "My Article Title (Updated)", null, null, null),
+                new ParagraphBlock("P", "Real body text.", null, null, null));
+
+        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleAndCover(
+                blocks, "My Article Title", "1*cover.png");
+
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
+    void stripDuplicateTitleAndCover_keepsUnrelatedInlineImages() {
+        List<ParagraphBlock> blocks = List.of(
+                new ParagraphBlock("H3", "My Article Title", null, null, null),
+                new ParagraphBlock("IMG", null, "1*unrelated.png", null, null));
+
+        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleAndCover(
+                blocks, "My Article Title", "1*cover.png");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).type()).isEqualTo("IMG");
+        assertThat(result.get(0).imageId()).isEqualTo("1*unrelated.png");
+    }
+
+    @Test
+    void stripDuplicateTitleAndCover_handlesEmptyOrNullInputsGracefully() {
+        assertThat(MediumArticleConverter.stripDuplicateTitleAndCover(List.of(), "Title", "1*x.png")).isEmpty();
+
+        List<ParagraphBlock> blocks = List.of(new ParagraphBlock("P", "Text", null, null, null));
+        assertThat(MediumArticleConverter.stripDuplicateTitleAndCover(blocks, null, null)).hasSize(1);
+    }
+
+    @Test
     void findPost_resolvesByIdAndThrowsWhenMissing() throws Exception {
         JsonNode state = parseFixtureState();
         JsonNode post = MediumArticleConverter.findPost(state, POST_ID);

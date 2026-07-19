@@ -155,6 +155,38 @@ public final class MediumArticleConverter {
         return resolved;
     }
 
+    // Medium always repeats the article title as the body's own first
+    // paragraph (a heading matching the title verbatim), and the cover/
+    // preview image is typically also the first inline image in the body --
+    // confirmed against a real article, where the first paragraph was an H3
+    // exactly matching the title, and its immediately-following IMG
+    // paragraph's metadata.id was the exact same asset as the post's
+    // previewImage.id. Both are already rendered separately by the post page
+    // template (title + coverImageUrl), so leaving them in the markdown body
+    // too would show them twice. Only removes an exact match -- a heading
+    // that merely resembles the title, or an unrelated image, is left alone.
+    public static List<ParagraphBlock> stripDuplicateTitleAndCover(List<ParagraphBlock> blocks, String title,
+                                                                     String previewImageId) {
+        List<ParagraphBlock> result = new ArrayList<>(blocks);
+        if (!result.isEmpty()) {
+            ParagraphBlock first = result.get(0);
+            boolean isHeading = "H3".equals(first.type()) || "H4".equals(first.type());
+            if (isHeading && title != null && first.renderedText() != null
+                    && first.renderedText().trim().equalsIgnoreCase(title.trim())) {
+                result.remove(0);
+            }
+        }
+        if (previewImageId != null && !previewImageId.isBlank()) {
+            for (int i = 0; i < result.size(); i++) {
+                if ("IMG".equals(result.get(i).type()) && previewImageId.equals(result.get(i).imageId())) {
+                    result.remove(i);
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
     // Unrecognized types fall through to a plain-text passthrough (with a
     // warning appended to `warnings`) rather than being dropped or throwing --
     // losing a paragraph silently would be worse than rendering it as an

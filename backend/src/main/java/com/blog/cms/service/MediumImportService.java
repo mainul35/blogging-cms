@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
@@ -248,9 +249,20 @@ public class MediumImportService {
     // -- confirmed against a real image URL. Reactor Netty's HttpClient does
     // not follow redirects by default, so without this every image download
     // silently received the empty 301 response instead of the actual image.
+    //
+    // maxInMemorySize is raised well past Spring's 256KB default -- a real
+    // Medium article page (fetched to confirm) is ~285KB, just over that
+    // default, and bodyToMono(String.class) hitting the limit didn't surface
+    // as a clean error: it raced with Netty's buffer release and manifested
+    // as an IllegalReferenceCountException that left the response hanging
+    // until Cloudflare's edge gave up with its own 502, instead of this
+    // service's own error handling ever getting a chance to run.
     private WebClient redirectFollowingWebClient() {
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create().followRedirect(true)))
+                .exchangeStrategies(ExchangeStrategies.builder()
+                        .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
+                        .build())
                 .build();
     }
 

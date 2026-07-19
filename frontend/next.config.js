@@ -33,6 +33,17 @@ const nextConfig = {
           source: '/api/:path*',
           destination: `${process.env.BACKEND_URL || 'http://localhost:8080'}/api/:path*`,
         },
+        // Uploaded images (avatars, post cover images, in-content images) are
+        // served by the backend at /uploads/** -- a public static resource
+        // handler, deliberately outside /api (see WebConfig.java /
+        // SecurityConfig.java). NEXT_PUBLIC_BACKEND_URL is the same origin as
+        // this frontend in production, so every uploaded-image URL the
+        // browser requests lands here first; without this rule it 404s
+        // instead of reaching the backend.
+        {
+          source: '/uploads/:path*',
+          destination: `${process.env.BACKEND_URL || 'http://localhost:8080'}/uploads/:path*`,
+        },
       ],
     };
   },

@@ -20,7 +20,9 @@ export default function EditPostPage() {
 
   const handleSubmit = async (data: PostRequest) => {
     await api.put(`/api/posts/${id}`, data);
+    // See create/page.tsx's handleSubmit for why refresh() is needed here too.
     router.push('/posts');
+    router.refresh();
   };
 
   if (error) return <p className="text-red-500">{error}</p>;

@@ -10,7 +10,11 @@ export default function CreatePostPage() {
 
   const handleSubmit = async (data: PostRequest) => {
     await api.post('/api/posts', data);
+    // The /posts list is a Server Component -- push() alone can reuse Next's
+    // client-side Router Cache and show the pre-mutation list until a hard
+    // reload. refresh() invalidates that cache so the list re-fetches fresh.
     router.push('/posts');
+    router.refresh();
   };
 
   return (

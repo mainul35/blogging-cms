@@ -37,7 +37,10 @@ export default function PostForm({ initialData, onSubmit }: PostFormProps) {
   const handleDelete = async () => {
     if (!initialData || !confirm('Delete this post? This cannot be undone.')) return;
     await api.delete(`/api/posts/${initialData.id}`);
+    // See app/(admin)/posts/create/page.tsx's handleSubmit for why refresh()
+    // is needed alongside push() here.
     router.push('/posts');
+    router.refresh();
   };
 
   return (

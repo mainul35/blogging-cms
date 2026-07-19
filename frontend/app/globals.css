@@ -146,11 +146,24 @@ a {
 }
 [data-theme='dark'] .prose code { background-color: #374151; }
 [data-theme='dark'] .prose pre { background-color: #030712; }
+
 /* code inside a pre block shouldn't get the inline-code chip background above
    -- <code> is an inline element, so painting a background on one that wraps
    across multiple lines (a multi-line code block) paints a separate box per
-   line instead of one solid block. The pre itself already has its own dark
-   background, so the nested code doesn't need one at all. */
+   line instead of one solid block, with near-white-on-near-white text.
+   MarkdownRenderer's own prose-pre:bg-gray-900/prose-pre:text-gray-100
+   classes make every code block dark UNCONDITIONALLY -- in every theme, not
+   just dark mode -- so this collision happens in the default/light theme
+   too, where the inline-code chip color comes from prose-code:bg-gray-100
+   (a zero-specificity :where() rule, per the comment above -- a plain
+   ".prose pre code" selector beats it fine). But in dark mode the chip
+   color instead comes from the plain-selector rule right above this one
+   ([data-theme='dark'] .prose code), whose extra [data-theme='dark']
+   attribute selector out-specifies a same-shape ".prose pre code" rule --
+   so BOTH an unscoped rule (for light/default) and a [data-theme='dark']
+  -scoped one (to out-specify the dark chip rule) are needed; one alone
+   only fixes one theme. */
+.prose pre code { background-color: transparent; }
 [data-theme='dark'] .prose pre code { background-color: transparent; }
 
 /* --- High contrast: darken/lighten the softest text & border shades that

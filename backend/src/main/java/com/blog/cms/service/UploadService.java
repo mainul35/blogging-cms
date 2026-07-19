@@ -38,19 +38,14 @@ public class UploadService {
         String contentType = file.headers().getContentType() != null
                 ? file.headers().getContentType().toString()
                 : "";
-        if (!allowedTypes.contains(contentType)) {
-            return Mono.error(new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "Allowed image types: " + String.join(", ", allowedTypes)));
-        }
-
         long contentLength = file.headers().getContentLength();
-        if (contentLength > maxSizeMb * 1024 * 1024) {
-            return Mono.error(new ResponseStatusException(
-                    HttpStatus.PAYLOAD_TOO_LARGE, "Image must be " + maxSizeMb + "MB or smaller"));
-        }
 
-        String extension = extensionFor(contentType);
-        String filename = UUID.randomUUID() + extension;
+        String filename;
+        try {
+            filename = validateAndGenerateFilename(contentType, contentLength);
+        } catch (ResponseStatusException e) {
+            return Mono.error(e);
+        }
 
         return Mono.fromCallable(() -> {
                     Path dir = Paths.get(uploadDir);
@@ -59,6 +54,40 @@ public class UploadService {
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(path -> file.transferTo(path).thenReturn(UPLOAD_URL_PREFIX + filename));
+    }
+
+    // Used for images downloaded server-side (e.g. the Medium importer) rather
+    // than uploaded directly by the browser as multipart -- same validation
+    // and storage as store(FilePart), just writing raw bytes instead of
+    // streaming a FilePart to disk.
+    public Mono<String> store(byte[] data, String contentType) {
+        String filename;
+        try {
+            filename = validateAndGenerateFilename(contentType, data.length);
+        } catch (ResponseStatusException e) {
+            return Mono.error(e);
+        }
+
+        return Mono.fromCallable(() -> {
+                    Path dir = Paths.get(uploadDir);
+                    Files.createDirectories(dir);
+                    Path path = dir.resolve(filename);
+                    Files.write(path, data);
+                    return UPLOAD_URL_PREFIX + filename;
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private String validateAndGenerateFilename(String contentType, long contentLength) {
+        if (!allowedTypes.contains(contentType)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Allowed image types: " + String.join(", ", allowedTypes));
+        }
+        if (contentLength > maxSizeMb * 1024 * 1024) {
+            throw new ResponseStatusException(
+                    HttpStatus.PAYLOAD_TOO_LARGE, "Image must be " + maxSizeMb + "MB or smaller");
+        }
+        return UUID.randomUUID() + extensionFor(contentType);
     }
 
     /** Filenames of our own uploaded images referenced by this post's content and cover image. */

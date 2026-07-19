@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { User, Mail, Palette } from 'lucide-react';
+import { User, Mail, Palette, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const sections = [
   { href: '/settings/profile', label: 'Profile', icon: User },
   { href: '/settings/mail', label: 'Mail', icon: Mail },
   { href: '/settings/personalization', label: 'Personalization', icon: Palette },
+  { href: '/settings/medium-import', label: 'Medium Import', icon: Download },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

@@ -3,46 +3,99 @@ package com.blog.cms.medium;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-// Pure, dependency-free parsing/conversion of Medium's internal article JSON
-// into this blog's markdown. No Spring/reactive/I/O here on purpose, so the
-// whole conversion pipeline is testable with a plain JUnit test and a hand
-// -built fixture. Medium's exact response shape is undocumented -- this is
-// reverse-engineered from the shape used by several well-known open-source
-// Medium-to-markdown converters, not verified against a live response.
-// Treat paragraph-type coverage as best-effort: an unrecognized type must
-// never abort the whole import, only degrade gracefully.
+// Pure, dependency-free parsing/conversion of Medium's article data into this
+// blog's markdown. No Spring/reactive/I/O here on purpose, so the whole
+// conversion pipeline is testable with a plain JUnit test and a hand-built
+// fixture.
+//
+// The "fetch URL" an admin captures from DevTools turns out to be the plain
+// article page itself (an HTML document request, not a JSON API call) --
+// confirmed against a real article. Medium's Next.js/Apollo frontend embeds
+// the full article as a normalized Apollo Client cache in a
+// `<script>window.__APOLLO_STATE__ = {...}</script>` block: a flat map of
+// "TypeName:id" -> object, where a Post's body paragraphs are `{"__ref":
+// "Paragraph:<id>"}` pointers that must be resolved against that same flat
+// map rather than inline objects. Once resolved, individual paragraph fields
+// (type/text/markups/metadata) match the shape used by well-known
+// open-source Medium-to-markdown converters. Treat paragraph-type coverage
+// as best-effort: an unrecognized type must never abort the whole import,
+// only degrade gracefully.
 public final class MediumArticleConverter {
 
     private static final String MIRO_BASE = "https://miro.medium.com/max/1400/";
+    private static final Pattern POST_ID_PATTERN = Pattern.compile("-([0-9a-f]{6,})/?$");
 
     private MediumArticleConverter() {
     }
 
-    // Medium's /_/api/* endpoints prefix the real JSON with an XSSI-protection
-    // string (historically `])}while(1);</x>`). Stripped by locating the
-    // first '{' rather than hardcoding that exact prefix, since it's an
-    // undocumented internal API detail that could vary between endpoints or
-    // change over time.
-    public static String stripXssiPrefix(String raw) {
-        int idx = raw.indexOf('{');
-        if (idx < 0) {
-            throw new IllegalArgumentException("No JSON object found in Medium response");
+    // Locates the `window.__APOLLO_STATE__ = {...};` assignment in the page
+    // HTML and returns the raw JSON object text. Medium unicode-escapes
+    // forward slashes inside string values (/ instead of a literal /)
+    // specifically to avoid a literal "</script>" ever appearing inside the
+    // JSON payload, which makes searching for the first "</script>" after the
+    // opening brace a safe way to find the end of the block.
+    public static String extractApolloStateJson(String html) {
+        int varIdx = html.indexOf("window.__APOLLO_STATE__");
+        if (varIdx < 0) {
+            throw new IllegalArgumentException("Could not find article data in this page -- "
+                    + "check you copied your own article's URL, not some other Medium page");
         }
-        return raw.substring(idx);
+        int braceIdx = html.indexOf('{', varIdx);
+        int scriptEndIdx = html.indexOf("</script>", braceIdx);
+        if (braceIdx < 0 || scriptEndIdx < 0) {
+            throw new IllegalArgumentException("Could not parse article data block in this page");
+        }
+        String raw = html.substring(braceIdx, scriptEndIdx).trim();
+        if (raw.endsWith(";")) {
+            raw = raw.substring(0, raw.length() - 1);
+        }
+        return raw;
     }
 
-    public static JsonNode extractPayloadValue(JsonNode root) {
-        JsonNode value = root.path("payload").path("value");
-        if (value.isMissingNode() || value.isNull()) {
-            throw new IllegalArgumentException("Could not locate payload.value in Medium response -- "
-                    + "check you copied the article-data request from DevTools, not a different one");
+    // Medium's post ID is the trailing hex segment of the article URL's slug
+    // (e.g. ".../my-title-d6aa51936735" -> "d6aa51936735"), which is exactly
+    // the id half of the Apollo cache's "Post:<id>" key -- no separate
+    // lookup/search through the cache is needed to find the right post.
+    public static String extractPostIdFromUrl(String url) {
+        Matcher m = POST_ID_PATTERN.matcher(url);
+        if (!m.find()) {
+            throw new IllegalArgumentException("Could not find a Medium post ID in that URL -- "
+                    + "paste your article's own URL (the one in your browser's address bar)");
         }
-        return value;
+        return m.group(1);
     }
 
-    public record ParagraphBlock(String type, String renderedText, String imageId, String embedHref) {
+    public static JsonNode findPost(JsonNode apolloState, String postId) {
+        JsonNode post = apolloState.path("Post:" + postId);
+        if (post.isMissingNode() || post.isNull()) {
+            throw new IllegalArgumentException("Could not find this article's data -- "
+                    + "the page may not be a Medium story, or Medium's page structure may have changed");
+        }
+        return post;
+    }
+
+    // The GraphQL field holding the article body is keyed by its own
+    // serialized arguments (e.g. `content({"postMeteringOptions":{...}})`),
+    // which can vary -- matched by prefix rather than the exact argument
+    // string so small argument differences don't break the lookup.
+    public static JsonNode findContent(JsonNode post) {
+        Iterator<String> fieldNames = post.fieldNames();
+        while (fieldNames.hasNext()) {
+            String name = fieldNames.next();
+            if (name.startsWith("content(")) {
+                return post.path(name);
+            }
+        }
+        return post.path("content");
+    }
+
+    public record ParagraphBlock(String type, String renderedText, String imageId, String embedHref,
+                                  String codeLang) {
     }
 
     public static String imageCdnUrl(String mediumImageId) {
@@ -50,7 +103,9 @@ public final class MediumArticleConverter {
     }
 
     // Exact-host-or-subdomain check, not a substring/contains check -- rejects
-    // suffix-spoofing hosts like "medium.com.evil.com". Pulled out as a pure,
+    // suffix-spoofing hosts like "medium.com.evil.com". Also allows
+    // "<username>.medium.com" custom subdomains, which is exactly how a real
+    // article URL looked when this was verified. Pulled out as a pure,
     // static, dependency-free method (rather than living inline in
     // MediumImportService) specifically so it's table-testable without a
     // Spring context.
@@ -60,40 +115,65 @@ public final class MediumArticleConverter {
         return h.equals("medium.com") || h.endsWith(".medium.com");
     }
 
+    // `paragraphs` is a JSON array of {"__ref": "Paragraph:<id>"} pointers --
+    // resolves each against the flat Apollo cache. An unresolvable ref is
+    // skipped with a warning rather than failing the whole import (Medium's
+    // cache can, in principle, omit an entity the page didn't end up
+    // rendering).
+    public static List<JsonNode> resolveParagraphRefs(JsonNode paragraphRefs, JsonNode apolloState,
+                                                        List<String> warnings) {
+        List<JsonNode> resolved = new ArrayList<>();
+        if (!paragraphRefs.isArray()) {
+            return resolved;
+        }
+        for (JsonNode refNode : paragraphRefs) {
+            String ref = refNode.path("__ref").asText(null);
+            if (ref == null) continue;
+            JsonNode paragraph = apolloState.path(ref);
+            if (paragraph.isMissingNode() || paragraph.isNull()) {
+                warnings.add("Could not resolve paragraph reference: " + ref);
+                continue;
+            }
+            resolved.add(paragraph);
+        }
+        return resolved;
+    }
+
     // Unrecognized types fall through to a plain-text passthrough (with a
     // warning appended to `warnings`) rather than being dropped or throwing --
     // losing a paragraph silently would be worse than rendering it as an
     // unstyled line.
-    public static List<ParagraphBlock> parseParagraphs(JsonNode paragraphsNode, List<String> warnings) {
+    public static List<ParagraphBlock> parseParagraphs(List<JsonNode> paragraphNodes, List<String> warnings) {
         List<ParagraphBlock> blocks = new ArrayList<>();
-        if (!paragraphsNode.isArray()) {
-            return blocks;
-        }
-        for (JsonNode node : paragraphsNode) {
+        for (JsonNode node : paragraphNodes) {
             String type = node.path("type").asText("");
             String text = node.path("text").asText("");
             switch (type) {
                 case "IMG" -> {
                     String imageId = node.path("metadata").path("id").asText(null);
                     if (imageId != null && !imageId.isBlank()) {
-                        blocks.add(new ParagraphBlock(type, null, imageId, null));
+                        blocks.add(new ParagraphBlock(type, null, imageId, null, null));
                     }
                 }
                 case "IFRAME", "MIXTAPE_EMBED" -> {
                     String href = node.path("iframe").path("mediaResource").path("href").asText(null);
                     if (href == null || href.isBlank()) {
-                        href = node.path("metadata").path("href").asText(null);
+                        href = node.path("mixtapeMetadata").path("href").asText(null);
                     }
                     if (href != null && !href.isBlank()) {
-                        blocks.add(new ParagraphBlock(type, null, null, href));
+                        blocks.add(new ParagraphBlock(type, null, null, href, null));
                     }
                 }
-                case "H3", "H4", "P", "BQ", "PQ", "PRE", "CODE_BLOCK", "ULI", "OLI" ->
-                        blocks.add(new ParagraphBlock(type, applyMarkups(text, node.path("markups")), null, null));
+                case "PRE", "CODE_BLOCK" -> {
+                    String lang = node.path("codeBlockMetadata").path("lang").asText(null);
+                    blocks.add(new ParagraphBlock(type, applyMarkups(text, node.path("markups")), null, null, lang));
+                }
+                case "H3", "H4", "P", "BQ", "PQ", "ULI", "OLI" ->
+                        blocks.add(new ParagraphBlock(type, applyMarkups(text, node.path("markups")), null, null, null));
                 default -> {
                     if (!text.isBlank()) {
                         warnings.add("Skipped unrecognized paragraph type: " + type);
-                        blocks.add(new ParagraphBlock(type, applyMarkups(text, node.path("markups")), null, null));
+                        blocks.add(new ParagraphBlock(type, applyMarkups(text, node.path("markups")), null, null, null));
                     }
                 }
             }
@@ -165,7 +245,8 @@ public final class MediumArticleConverter {
             case "H3" -> "### " + block.renderedText();
             case "H4" -> "#### " + block.renderedText();
             case "BQ", "PQ" -> "> " + block.renderedText();
-            case "PRE", "CODE_BLOCK" -> "```\n" + block.renderedText() + "\n```";
+            case "PRE", "CODE_BLOCK" -> "```" + (block.codeLang() != null ? block.codeLang() : "")
+                    + "\n" + block.renderedText() + "\n```";
             case "ULI" -> "- " + block.renderedText();
             case "OLI" -> "1. " + block.renderedText();
             case "IFRAME", "MIXTAPE_EMBED" -> block.embedHref() != null

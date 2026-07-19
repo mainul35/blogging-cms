@@ -13,11 +13,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.netty.http.client.HttpClient;
 
 import java.net.URI;
 import java.time.Duration;
@@ -46,6 +48,7 @@ public class MediumImportService {
 
     public Mono<MediumImportResponse> importArticle(MediumImportRequest request, String authorEmail) {
         URI fetchUri = validateFetchUrl(request.getFetchUrl());
+        String postId = extractPostId(fetchUri);
 
         return isWithinRateLimit(authorEmail)
                 .flatMap(allowed -> {
@@ -56,9 +59,17 @@ public class MediumImportService {
                     return userRepository.findByEmail(authorEmail)
                             .switchIfEmpty(Mono.error(new ResponseStatusException(
                                     HttpStatus.UNAUTHORIZED, "Author not found")))
-                            .flatMap(author -> fetchArticle(fetchUri)
-                                    .flatMap(root -> buildPost(root, author.getId())));
+                            .flatMap(author -> fetchArticlePage(fetchUri)
+                                    .flatMap(apolloState -> buildPost(apolloState, postId, author.getId())));
                 });
+    }
+
+    private String extractPostId(URI fetchUri) {
+        try {
+            return MediumArticleConverter.extractPostIdFromUrl(fetchUri.toString());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
     }
 
     // Runs before any network call. This endpoint makes the server perform an
@@ -95,11 +106,16 @@ public class MediumImportService {
     }
 
     // Plain unauthenticated GET, no cookies -- v1 only supports articles
-    // Medium serves publicly. Same inline-per-call WebClient pattern as
+    // Medium serves publicly (verified against a real article: the full body
+    // was present in the response with no authentication at all). The "fetch
+    // URL" an admin captures from DevTools turns out to be the article's own
+    // page, not a JSON API endpoint -- so this fetches HTML and extracts the
+    // embedded Apollo Client state, rather than parsing the response body as
+    // JSON directly. Same inline-per-call WebClient pattern as
     // ResendMailSender/SendGridMailSender (no shared bean exists in this
     // codebase for outbound HTTP).
-    private Mono<JsonNode> fetchArticle(URI fetchUri) {
-        WebClient webClient = WebClient.builder().build();
+    private Mono<JsonNode> fetchArticlePage(URI fetchUri) {
+        WebClient webClient = redirectFollowingWebClient();
         return webClient.get()
                 .uri(fetchUri)
                 .retrieve()
@@ -108,34 +124,43 @@ public class MediumImportService {
                 .onErrorMap(e -> !(e instanceof ResponseStatusException), e ->
                         new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                                 "Could not fetch article from Medium: " + e.getMessage()))
-                .flatMap(raw -> {
+                .flatMap(html -> {
                     try {
-                        String stripped = MediumArticleConverter.stripXssiPrefix(raw);
-                        return Mono.just(objectMapper.readTree(stripped));
+                        String json = MediumArticleConverter.extractApolloStateJson(html);
+                        return Mono.just(objectMapper.readTree(json));
+                    } catch (IllegalArgumentException e) {
+                        return Mono.error(new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage()));
                     } catch (Exception e) {
                         return Mono.error(new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-                                "Unexpected response shape from Medium -- check you copied the "
-                                        + "article-data request, not a different one"));
+                                "Unexpected page structure from Medium -- Medium may have changed how "
+                                        + "it renders articles"));
                     }
                 });
     }
 
-    private Mono<MediumImportResponse> buildPost(JsonNode root, Long authorId) {
-        JsonNode value;
+    private Mono<MediumImportResponse> buildPost(JsonNode apolloState, String postId, Long authorId) {
+        JsonNode post;
+        JsonNode content;
         try {
-            value = MediumArticleConverter.extractPayloadValue(root);
+            post = MediumArticleConverter.findPost(apolloState, postId);
+            content = MediumArticleConverter.findContent(post);
         } catch (IllegalArgumentException e) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage()));
         }
 
-        String title = value.path("title").asText("Untitled");
-        String rawExcerpt = value.path("content").path("subtitle").asText(null);
+        String title = post.path("title").asText("Untitled");
+        String rawExcerpt = post.path("extendedPreviewContent").path("subtitle").asText(null);
+        if (rawExcerpt == null || rawExcerpt.isBlank()) {
+            rawExcerpt = post.path("previewContent").path("subtitle").asText(null);
+        }
         String excerpt = (rawExcerpt == null || rawExcerpt.isBlank()) ? null : rawExcerpt;
-        JsonNode paragraphsNode = value.path("content").path("bodyModel").path("paragraphs");
-        String previewImageId = value.path("virtuals").path("previewImage").path("id").asText(null);
+        String previewImageId = post.path("previewImage").path("id").asText(null);
 
         List<String> warnings = new ArrayList<>();
-        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(paragraphsNode, warnings);
+        JsonNode paragraphRefs = content.path("bodyModel").path("paragraphs");
+        List<JsonNode> resolvedParagraphs = MediumArticleConverter.resolveParagraphRefs(
+                paragraphRefs, apolloState, warnings);
+        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(resolvedParagraphs, warnings);
 
         AtomicInteger imagesImported = new AtomicInteger();
         AtomicInteger imagesFailed = new AtomicInteger();
@@ -148,10 +173,10 @@ public class MediumImportService {
                 .flatMap(coverUrl -> resolveBody(blocks, imagesImported, imagesFailed)
                         .flatMap(markdown -> saveDraft(title, excerpt,
                                 coverUrl.isBlank() ? null : coverUrl, markdown, authorId))
-                        .map(post -> MediumImportResponse.builder()
-                                .postId(post.getId())
-                                .slug(post.getSlug())
-                                .title(post.getTitle())
+                        .map(savedPost -> MediumImportResponse.builder()
+                                .postId(savedPost.getId())
+                                .slug(savedPost.getSlug())
+                                .title(savedPost.getTitle())
                                 .imagesImported(imagesImported.get())
                                 .imagesFailed(imagesFailed.get())
                                 .warnings(warnings)
@@ -194,14 +219,17 @@ public class MediumImportService {
     // substitutes a placeholder note instead.
     private Mono<String> downloadAndStoreImage(String mediumImageId) {
         String cdnUrl = MediumArticleConverter.imageCdnUrl(mediumImageId);
-        return WebClient.builder().build().get()
+        return redirectFollowingWebClient().get()
                 .uri(cdnUrl)
                 .retrieve()
                 .toEntity(byte[].class)
                 .timeout(Duration.ofSeconds(15))
                 .flatMap(entity -> {
                     byte[] body = entity.getBody();
-                    if (body == null || body.length == 0) return Mono.empty();
+                    if (body == null || body.length == 0) {
+                        log.warn("Medium image {} returned an empty body", mediumImageId);
+                        return Mono.empty();
+                    }
                     String contentType = entity.getHeaders().getContentType() != null
                             ? entity.getHeaders().getContentType().toString()
                             : "image/jpeg";
@@ -211,6 +239,17 @@ public class MediumImportService {
                     log.warn("Failed to import Medium image {}: {}", mediumImageId, e.getMessage());
                     return Mono.empty();
                 });
+    }
+
+    // miro.medium.com (the image CDN) 301-redirects every request to a
+    // versioned resize path (e.g. /max/1400/<id> -> /v2/resize:fit:1400/<id>)
+    // -- confirmed against a real image URL. Reactor Netty's HttpClient does
+    // not follow redirects by default, so without this every image download
+    // silently received the empty 301 response instead of the actual image.
+    private WebClient redirectFollowingWebClient() {
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(HttpClient.create().followRedirect(true)))
+                .build();
     }
 
     private Mono<Post> saveDraft(String title, String excerpt, String coverImageUrl, String markdown, Long authorId) {

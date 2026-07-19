@@ -14,84 +14,140 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 // Plain JUnit, no Spring context -- MediumArticleConverter has zero
 // Spring/reactive/I/O dependencies on purpose, so the whole parse/convert
-// pipeline is exercisable here with a hand-built fixture, without needing
-// a real Medium response.
+// pipeline is exercisable here with a hand-built fixture. This fixture's
+// shape (HTML page with an embedded window.__APOLLO_STATE__ normalized
+// cache, paragraphs stored as {"__ref": "Paragraph:<id>"} pointers into a
+// flat "TypeName:id" -> object map) was confirmed against a real Medium
+// article fetch; field names/values below are synthetic, not the real
+// article's content.
 class MediumArticleConverterTest {
 
-    private static final String FIXTURE = """
-            ])}while(1);</x>{"payload":{"value":{
+    private static final String POST_ID = "abc123def456";
+
+    private static final String FIXTURE_HTML = """
+            <!doctype html><html><head><title>Test</title></head><body>
+            <div id="root"></div>
+            <script>window.__APOLLO_STATE__ = {"Post:abc123def456":{
+              "__typename":"Post",
               "title":"Test Article",
-              "content":{"subtitle":"A subtitle",
-                "bodyModel":{"paragraphs":[
-                  {"type":"H3","text":"Heading","markups":[]},
-                  {"type":"P","text":"Some bold and a link.","markups":[
-                    {"type":"STRONG","start":5,"end":9},
-                    {"type":"A","start":16,"end":20,"href":"https://example.com"}]},
-                  {"type":"IMG","text":"","metadata":{"id":"1*abc123.png"}},
-                  {"type":"ULI","text":"item one","markups":[]},
-                  {"type":"ULI","text":"item two","markups":[]},
-                  {"type":"WEIRD_FUTURE_TYPE","text":"fallback text","markups":[]}
-                ]}},
-              "virtuals":{"previewImage":{"id":"1*cover.png"}}
-            }}}""";
+              "extendedPreviewContent":{"__typename":"PreviewContent","subtitle":"A subtitle"},
+              "previewImage":{"__typename":"ImageMetadata","id":"1*cover.png"},
+              "content({\\"postMeteringOptions\\":{\\"referrer\\":\\"\\"}})":{
+                "__typename":"PostContent",
+                "bodyModel":{"__typename":"RichText","paragraphs":[
+                  {"__ref":"Paragraph:p_0"},
+                  {"__ref":"Paragraph:p_1"},
+                  {"__ref":"Paragraph:p_2"},
+                  {"__ref":"Paragraph:p_3"},
+                  {"__ref":"Paragraph:p_4"},
+                  {"__ref":"Paragraph:p_5"},
+                  {"__ref":"Paragraph:p_missing"}
+                ]}
+              }
+            },
+            "Paragraph:p_0":{"__typename":"Paragraph","type":"H3","text":"Heading","markups":[]},
+            "Paragraph:p_1":{"__typename":"Paragraph","type":"P","text":"Some bold and a link.","markups":[
+              {"__typename":"Markup","type":"STRONG","start":5,"end":9},
+              {"__typename":"Markup","type":"A","start":16,"end":20,"href":"https://example.com"}]},
+            "Paragraph:p_2":{"__typename":"Paragraph","type":"IMG","text":"","metadata":{"__typename":"ImageMetadata","id":"1*abc123.png"}},
+            "Paragraph:p_3":{"__typename":"Paragraph","type":"ULI","text":"item one","markups":[]},
+            "Paragraph:p_4":{"__typename":"Paragraph","type":"ULI","text":"item two","markups":[]},
+            "Paragraph:p_5":{"__typename":"Paragraph","type":"PRE","text":"echo hello","markups":[],"codeBlockMetadata":{"__typename":"CodeBlockMetadata","mode":"EXPLICIT","lang":"shell"}}
+            };</script>
+            <script>window.__OTHER_STATE__ = {"unrelated": true};</script>
+            </body></html>""";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void stripXssiPrefix_findsFirstBrace() {
-        String stripped = MediumArticleConverter.stripXssiPrefix(FIXTURE);
-        assertThat(stripped).startsWith("{");
-        assertThat(stripped).doesNotContain("while(1)");
+    void extractApolloStateJson_findsTheRightScriptBlock() throws Exception {
+        String json = MediumArticleConverter.extractApolloStateJson(FIXTURE_HTML);
+        JsonNode root = objectMapper.readTree(json);
+        assertThat(root.has("Post:abc123def456")).isTrue();
+        assertThat(root.has("unrelated")).isFalse();
     }
 
     @Test
-    void stripXssiPrefix_throwsWhenNoJsonObjectPresent() {
+    void extractApolloStateJson_throwsWhenVariableNotPresent() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> MediumArticleConverter.stripXssiPrefix("not json at all"));
+                () -> MediumArticleConverter.extractApolloStateJson("<html><body>no state here</body></html>"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "'https://mainul35.medium.com/complete-guide-to-docker-d6aa51936735', d6aa51936735",
+            "'https://medium.com/@someone/a-title-abc123def456', abc123def456",
+            "'https://medium.com/@someone/a-title-abc123def456/', abc123def456",
+    })
+    void extractPostIdFromUrl_findsTrailingHexSegment(String url, String expectedId) {
+        assertThat(MediumArticleConverter.extractPostIdFromUrl(url)).isEqualTo(expectedId);
     }
 
     @Test
-    void extractPayloadValue_resolvesTitleAndSubtitle() throws Exception {
-        JsonNode root = parseFixture();
-        JsonNode value = MediumArticleConverter.extractPayloadValue(root);
-        assertThat(value.path("title").asText()).isEqualTo("Test Article");
-        assertThat(value.path("content").path("subtitle").asText()).isEqualTo("A subtitle");
-    }
-
-    @Test
-    void extractPayloadValue_throwsWhenMissing() throws Exception {
-        JsonNode root = objectMapper.readTree("{\"nothing\":\"here\"}");
+    void extractPostIdFromUrl_throwsWhenNoHexSegmentPresent() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> MediumArticleConverter.extractPayloadValue(root));
+                () -> MediumArticleConverter.extractPostIdFromUrl("https://medium.com/@someone/just-words"));
+    }
+
+    @Test
+    void findPost_resolvesByIdAndThrowsWhenMissing() throws Exception {
+        JsonNode state = parseFixtureState();
+        JsonNode post = MediumArticleConverter.findPost(state, POST_ID);
+        assertThat(post.path("title").asText()).isEqualTo("Test Article");
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> MediumArticleConverter.findPost(state, "nonexistent"));
+    }
+
+    @Test
+    void findContent_matchesFieldByPrefixRegardlessOfArguments() throws Exception {
+        JsonNode state = parseFixtureState();
+        JsonNode post = MediumArticleConverter.findPost(state, POST_ID);
+        JsonNode content = MediumArticleConverter.findContent(post);
+        assertThat(content.path("__typename").asText()).isEqualTo("PostContent");
+        assertThat(content.path("bodyModel").path("paragraphs").isArray()).isTrue();
+    }
+
+    @Test
+    void resolveParagraphRefs_resolvesKnownRefsAndWarnsOnMissingOnes() throws Exception {
+        JsonNode state = parseFixtureState();
+        JsonNode post = MediumArticleConverter.findPost(state, POST_ID);
+        JsonNode content = MediumArticleConverter.findContent(post);
+        JsonNode refs = content.path("bodyModel").path("paragraphs");
+        List<String> warnings = new ArrayList<>();
+
+        List<JsonNode> resolved = MediumArticleConverter.resolveParagraphRefs(refs, state, warnings);
+
+        assertThat(resolved).hasSize(6); // 7 refs, 1 unresolvable
+        assertThat(warnings).containsExactly("Could not resolve paragraph reference: Paragraph:p_missing");
     }
 
     @Test
     void applyMarkups_insertsBoldAndLinkAtCorrectOffsets() throws Exception {
-        JsonNode root = parseFixture();
-        JsonNode paragraphs = MediumArticleConverter.extractPayloadValue(root)
-                .path("content").path("bodyModel").path("paragraphs");
-        JsonNode boldLinkParagraph = paragraphs.get(1);
+        JsonNode state = parseFixtureState();
+        JsonNode paragraph = state.path("Paragraph:p_1");
         String rendered = MediumArticleConverter.applyMarkups(
-                boldLinkParagraph.path("text").asText(), boldLinkParagraph.path("markups"));
+                paragraph.path("text").asText(), paragraph.path("markups"));
         assertThat(rendered).isEqualTo("Some **bold** and a [link](https://example.com).");
     }
 
     @Test
-    void parseParagraphs_mapsKnownTypesAndFallsBackOnUnrecognizedType() throws Exception {
-        JsonNode root = parseFixture();
-        JsonNode paragraphsNode = MediumArticleConverter.extractPayloadValue(root)
-                .path("content").path("bodyModel").path("paragraphs");
+    void parseParagraphs_mapsKnownTypesIncludingCodeBlockLanguage() throws Exception {
+        JsonNode state = parseFixtureState();
+        JsonNode post = MediumArticleConverter.findPost(state, POST_ID);
+        JsonNode refs = MediumArticleConverter.findContent(post).path("bodyModel").path("paragraphs");
         List<String> warnings = new ArrayList<>();
+        List<JsonNode> resolved = MediumArticleConverter.resolveParagraphRefs(refs, state, warnings);
 
-        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(paragraphsNode, warnings);
+        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(resolved, warnings);
 
         assertThat(blocks).hasSize(6);
         assertThat(blocks.get(0).type()).isEqualTo("H3");
         assertThat(blocks.get(2).type()).isEqualTo("IMG");
         assertThat(blocks.get(2).imageId()).isEqualTo("1*abc123.png");
-        assertThat(blocks.get(5).type()).isEqualTo("WEIRD_FUTURE_TYPE");
-        assertThat(blocks.get(5).renderedText()).isEqualTo("fallback text");
-        assertThat(warnings).containsExactly("Skipped unrecognized paragraph type: WEIRD_FUTURE_TYPE");
+        assertThat(blocks.get(5).type()).isEqualTo("PRE");
+        assertThat(blocks.get(5).codeLang()).isEqualTo("shell");
+        assertThat(MediumArticleConverter.markdownFor(blocks.get(5))).isEqualTo("```shell\necho hello\n```");
     }
 
     @Test
@@ -116,11 +172,12 @@ class MediumArticleConverterTest {
 
     @Test
     void fullFixture_endToEndConversionProducesExpectedMarkdown() throws Exception {
-        JsonNode root = parseFixture();
-        JsonNode value = MediumArticleConverter.extractPayloadValue(root);
-        JsonNode paragraphsNode = value.path("content").path("bodyModel").path("paragraphs");
+        JsonNode state = parseFixtureState();
+        JsonNode post = MediumArticleConverter.findPost(state, POST_ID);
+        JsonNode refs = MediumArticleConverter.findContent(post).path("bodyModel").path("paragraphs");
         List<String> warnings = new ArrayList<>();
-        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(paragraphsNode, warnings);
+        List<JsonNode> resolved = MediumArticleConverter.resolveParagraphRefs(refs, state, warnings);
+        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(resolved, warnings);
 
         List<String> blockMarkdown = new ArrayList<>();
         List<String> blockTypes = new ArrayList<>();
@@ -139,8 +196,8 @@ class MediumArticleConverterTest {
                         + "Some **bold** and a [link](https://example.com).\n\n"
                         + "![](/uploads/fake.png)\n\n"
                         + "- item one\n- item two\n\n"
-                        + "fallback text");
-        assertThat(warnings).hasSize(1);
+                        + "```shell\necho hello\n```");
+        assertThat(warnings).containsExactly("Could not resolve paragraph reference: Paragraph:p_missing");
     }
 
     @ParameterizedTest
@@ -161,7 +218,7 @@ class MediumArticleConverterTest {
         assertThat(MediumArticleConverter.isAllowedFetchHost(null)).isFalse();
     }
 
-    private JsonNode parseFixture() throws Exception {
-        return objectMapper.readTree(MediumArticleConverter.stripXssiPrefix(FIXTURE));
+    private JsonNode parseFixtureState() throws Exception {
+        return objectMapper.readTree(MediumArticleConverter.extractApolloStateJson(FIXTURE_HTML));
     }
 }

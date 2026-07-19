@@ -36,10 +36,11 @@ export default function MediumImportPage() {
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 text-xs text-gray-600 space-y-1">
         <p className="font-medium text-gray-700">How to get the fetch URL</p>
         <p>
-          Open your article on Medium, open your browser&apos;s DevTools (F12) → Network tab, reload
-          the page, and look for a request to an internal API URL that looks like{' '}
-          <code className="bg-gray-200 px-1 rounded">https://medium.com/_/api/posts/&lt;postId&gt;</code>.
-          Right-click that request → Copy → Copy URL, then paste it below.
+          Open your article on Medium and copy its URL — either straight from your browser&apos;s
+          address bar, or from DevTools (F12) → Network tab: reload the page, find the top-level
+          document request (the one matching the page itself, e.g.{' '}
+          <code className="bg-gray-200 px-1 rounded">https://yourname.medium.com/your-article-title-abc123</code>
+          ), right-click → Copy → Copy URL. Paste it below either way.
         </p>
       </div>
 

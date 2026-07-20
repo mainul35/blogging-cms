@@ -284,8 +284,27 @@ public final class MediumArticleConverter {
                 }
             }
             if (prefix.isEmpty() && suffix.isEmpty()) continue;
-            sb.insert(m.end(), suffix);
-            sb.insert(m.start(), prefix);
+
+            // Medium's recorded start/end sometimes includes the word's
+            // trailing (or leading) space -- e.g. a STRONG span covering
+            // "New Project " (with the space) rather than "New Project".
+            // Inserting "**" right at that raw `end` then puts the closing
+            // delimiter after whitespace, which CommonMark's flanking rule
+            // for emphasis/strong explicitly disallows as a closer -- remark
+            // leaves it as two literal asterisks instead of rendering bold.
+            // Confirmed against a real published post: "**SAVE AND CONTINUE
+            // **button" rendered as literal asterisks around plain text.
+            // Trimming the span to its actual non-whitespace content first
+            // keeps the delimiters directly against real characters, so
+            // markdown parses it as intended either way.
+            int start = m.start();
+            int end = m.end();
+            while (start < end && Character.isWhitespace(text.charAt(start))) start++;
+            while (end > start && Character.isWhitespace(text.charAt(end - 1))) end--;
+            if (start >= end) continue;
+
+            sb.insert(end, suffix);
+            sb.insert(start, prefix);
         }
         return sb.toString();
     }

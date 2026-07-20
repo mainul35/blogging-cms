@@ -219,6 +219,21 @@ class MediumArticleConverterTest {
     }
 
     @Test
+    void applyMarkups_spanIncludingTrailingSpace_closingDelimiterStaysAgainstTheWord() throws Exception {
+        // Reproduces a bug found by comparing a real published post against
+        // its Medium source: Medium's own markup span for "New Project"
+        // included the trailing space before "button", so naively inserting
+        // "**" at that raw end offset put the closing delimiter after
+        // whitespace ("**New Project **button") -- CommonMark's flanking
+        // rule for strong/em disallows a closer preceded by whitespace, so
+        // remark left it as two literal asterisks instead of bold text.
+        JsonNode markups = objectMapper.readTree(
+                "[{\"__typename\":\"Markup\",\"type\":\"STRONG\",\"start\":0,\"end\":12}]");
+        String rendered = MediumArticleConverter.applyMarkups("New Project button", markups);
+        assertThat(rendered).isEqualTo("**New Project** button");
+    }
+
+    @Test
     void parseParagraphs_mapsKnownTypesIncludingCodeBlockLanguage() throws Exception {
         JsonNode state = parseFixtureState();
         JsonNode post = MediumArticleConverter.findPost(state, POST_ID);

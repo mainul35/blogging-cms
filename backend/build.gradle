@@ -43,6 +43,14 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'io.projectreactor:reactor-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    // In-JVM fake SMTP server for SmtpMailSender's real send-path test --
+    // JavaMailSenderImpl just gets pointed at its host/port like any other
+    // SMTP server, no production code changes needed. HTTP-facing senders
+    // (Resend/SendGrid) and MediumImportService use JDK's own
+    // com.sun.net.httpserver.HttpServer / a fake ExchangeFunction instead,
+    // needing no extra dependency.
+    testImplementation 'com.icegreen:greenmail:2.1.3'
+    testImplementation 'com.icegreen:greenmail-junit5:2.1.3'
 }
 
 test {

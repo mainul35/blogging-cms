@@ -14,9 +14,18 @@ import java.util.Map;
 // from the current DB-stored MailSettings by MailSenderRouter).
 public class SendGridMailSender {
 
+    private static final String SENDGRID_BASE_URL = "https://api.sendgrid.com";
+
     public static Mono<Void> send(MailMessage message, MailSettings settings) {
+        return send(message, settings, SENDGRID_BASE_URL);
+    }
+
+    // Package-private overload purely for testability -- see ResendMailSender's
+    // identical pattern for why. The public 2-arg overload always uses the
+    // real endpoint.
+    static Mono<Void> send(MailMessage message, MailSettings settings, String baseUrl) {
         WebClient webClient = WebClient.builder()
-                .baseUrl("https://api.sendgrid.com")
+                .baseUrl(baseUrl)
                 .defaultHeader("Authorization", "Bearer " + settings.getSendgridApiKey())
                 .build();
 

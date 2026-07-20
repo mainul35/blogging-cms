@@ -12,9 +12,19 @@ import java.util.Map;
 // from the current DB-stored MailSettings by MailSenderRouter).
 public class ResendMailSender {
 
+    private static final String RESEND_BASE_URL = "https://api.resend.com";
+
     public static Mono<Void> send(MailMessage message, MailSettings settings) {
+        return send(message, settings, RESEND_BASE_URL);
+    }
+
+    // Package-private overload purely for testability -- lets a same-package
+    // test point this at a local JDK HttpServer instead of the real Resend
+    // API. The public 2-arg overload above always uses the real endpoint;
+    // this doesn't change behavior for any real caller.
+    static Mono<Void> send(MailMessage message, MailSettings settings, String baseUrl) {
         WebClient webClient = WebClient.builder()
-                .baseUrl("https://api.resend.com")
+                .baseUrl(baseUrl)
                 .defaultHeader("Authorization", "Bearer " + settings.getResendApiKey())
                 .build();
 

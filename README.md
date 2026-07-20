@@ -29,6 +29,7 @@ Then open `http://localhost:3000`. First run redirects to `/setup` to create you
 - Backend: `http://localhost:8080`
 - Frontend: `http://localhost:3000`
 - Email sandbox (optional, already running alongside postgres/redis from step 1): set provider **smtp**, host `localhost`, port `1025`, auth/STARTTLS off in Settings → Mail — every email shows up at `http://localhost:8025` instead of a real inbox. Not used unless you configure it (`mail_settings` seeds provider "log").
+- **Running the backend from an IDE instead of `gradlew bootRun`?** If it fails with `Docker Compose file '..\docker-compose.yml' does not exist`, your run configuration's working directory isn't `backend/` (common for IDE launchers that don't delegate to Gradle — they often default to the repo root instead). Either set the run configuration's working directory to `backend/`, or set an environment variable `SPRING_DOCKER_COMPOSE_FILE=docker-compose.yml` on that run configuration instead.
 
 ## Configuration
 

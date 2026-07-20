@@ -1,15 +1,23 @@
 spring:
   docker:
     compose:
-      # docker-compose.yml lives at the repo root, one level above this
-      # module's own working directory (backend/) -- spring-boot-docker-
-      # compose's default auto-detection only looks in its own working dir
-      # and fails hard (IllegalStateException) if nothing's there, so this
-      # has to be explicit. Only takes effect at all when the
-      # spring-boot-docker-compose module is actually on the classpath --
-      # it's a `developmentOnly` dependency in build.gradle, so this is a
-      # no-op in the packaged production jar.
-      file: ../docker-compose.yml
+      # docker-compose.yml lives at the repo root. spring-boot-docker-
+      # compose's own auto-detection only searches the process's working
+      # directory and fails hard (IllegalStateException/IllegalArgumentException)
+      # if nothing's found there, so this has to be explicit -- but "the
+      # working directory" isn't the same for every launcher: `gradlew
+      # bootRun` defaults to this module's own directory (backend/), so
+      # "../docker-compose.yml" resolves correctly there, but an IDE run
+      # configuration that isn't delegating to Gradle commonly defaults to
+      # the repo root instead, where that same relative path resolves one
+      # level too high and fails. SPRING_DOCKER_COMPOSE_FILE lets a run
+      # configuration override this per-launcher instead of everyone's IDE
+      # needing to match Gradle's own working-directory convention. Only
+      # takes effect at all when the spring-boot-docker-compose module is
+      # actually on the classpath -- it's a `developmentOnly` dependency in
+      # build.gradle, so this whole block is a no-op in the packaged
+      # production jar.
+      file: ${SPRING_DOCKER_COMPOSE_FILE:../docker-compose.yml}
 
   r2dbc:
     url: r2dbc:postgresql://localhost:5432/blogcms

@@ -2,7 +2,15 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { importMediumArticle } from '@/lib/mediumImport';
+import { pollMediumImportJob, startMediumImport } from '@/lib/mediumImport';
+import type { MediumImportJobStatusResponse } from '@/types/mediumImport';
+
+const STATUS_LABEL: Record<MediumImportJobStatusResponse['state'], string> = {
+  PENDING: 'Queued…',
+  RUNNING: 'Importing… this can take a couple of minutes for image-heavy articles.',
+  DONE: 'Done!',
+  FAILED: 'Failed.',
+};
 
 export default function MediumImportPage() {
   const router = useRouter();
@@ -10,18 +18,25 @@ export default function MediumImportPage() {
   const [ownershipConfirmed, setOwnershipConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [statusLabel, setStatusLabel] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setStatusLabel(STATUS_LABEL.PENDING);
     setLoading(true);
     try {
-      const result = await importMediumArticle({ fetchUrl, ownershipConfirmed });
+      const { jobId } = await startMediumImport({ fetchUrl, ownershipConfirmed });
+      const result = await pollMediumImportJob(jobId, status => setStatusLabel(STATUS_LABEL[status.state]));
+      if (result.state === 'FAILED') {
+        throw new Error(result.errorMessage || 'Import failed.');
+      }
       router.push(`/posts/${result.postId}/edit`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not import article.');
     } finally {
       setLoading(false);
+      setStatusLabel('');
     }
   };
 
@@ -86,7 +101,7 @@ export default function MediumImportPage() {
           disabled={loading || !ownershipConfirmed || !fetchUrl}
           className="w-full py-2 bg-black text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors"
         >
-          {loading ? 'Importing…' : 'Import Article'}
+          {loading ? statusLabel || 'Importing…' : 'Import Article'}
         </button>
       </form>
     </div>

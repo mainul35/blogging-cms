@@ -1,5 +1,7 @@
 package com.blog.cms.service;
 
+import com.blog.cms.dto.MediumImportJobState;
+import com.blog.cms.dto.MediumImportJobStatusResponse;
 import com.blog.cms.dto.MediumImportRequest;
 import com.blog.cms.dto.MediumImportResponse;
 import com.blog.cms.medium.MediumArticleConverter;
@@ -24,9 +26,11 @@ import reactor.netty.http.client.HttpClient;
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -47,7 +51,43 @@ public class MediumImportService {
     private final ReactiveRedisTemplate<String, Object> redisTemplate;
     private final ObjectMapper objectMapper;
 
-    public Mono<MediumImportResponse> importArticle(MediumImportRequest request, String authorEmail) {
+    // Async job model (replaces an earlier synchronous version that returned
+    // the finished post directly): the fetch-article + N-image-download chain
+    // could take well over a minute for an image-heavy article, and holding
+    // one HTTP request open through Cloudflare for that whole duration meant
+    // racing Cloudflare's own ~100s free/pro-tier edge timeout (not raisable
+    // from the dashboard on that plan) -- a race the backend sometimes lost,
+    // showing Cloudflare's bare generic 502 page instead of any message this
+    // app controls. See troubleshooting.md's "Medium import 502" entries for
+    // the two prior attempts (raising the buffer, then a backend-side
+    // timeout) that only mitigated this, not fixed it structurally.
+    //
+    // Now: POST creates a job and returns its id immediately (sub-second);
+    // the actual import runs detached (see startImportJob's .subscribe()) and
+    // writes its progress to Redis; the frontend polls GET .../{jobId}/status
+    // every couple seconds instead of holding one long connection open. Each
+    // individual HTTP call is now fast, so Cloudflare's edge timeout stops
+    // being relevant to this feature at all -- no more number to tune.
+    private static final Duration JOB_TTL = Duration.ofMinutes(30);
+    private static final String JOB_KEY_PREFIX = "medium-import-job:";
+
+    // Purely defensive now (not racing anything) -- catches a genuinely wedged
+    // job (e.g. Medium's CDN hanging past its own per-call timeouts in some
+    // way not already handled) so it doesn't sit in RUNNING forever instead
+    // of ever reaching a terminal state.
+    private static final Duration JOB_SAFETY_TIMEOUT = Duration.ofMinutes(5);
+
+    // Bounded concurrency for image downloads (see resolveBody below) -- caps
+    // miro.medium.com at this many simultaneous requests, not a hammering burst.
+    private static final int IMAGE_DOWNLOAD_CONCURRENCY = 3;
+
+    // Fast path only: validates the URL, checks the rate limit, and looks up
+    // the author -- all fail-fast, in-request checks -- then hands off the
+    // slow work (runImportJob) to a detached subscription and returns the new
+    // job's id without waiting for it. A bad URL, a rate limit, or a missing
+    // author all still fail synchronously with the same 400/429/401 as
+    // before; only the genuinely slow, best-effort part is now async.
+    public Mono<String> startImportJob(MediumImportRequest request, String authorEmail) {
         URI fetchUri = validateFetchUrl(request.getFetchUrl());
         String postId = extractPostId(fetchUri);
 
@@ -59,10 +99,77 @@ public class MediumImportService {
                     }
                     return userRepository.findByEmail(authorEmail)
                             .switchIfEmpty(Mono.error(new ResponseStatusException(
-                                    HttpStatus.UNAUTHORIZED, "Author not found")))
-                            .flatMap(author -> fetchArticlePage(fetchUri)
-                                    .flatMap(apolloState -> buildPost(apolloState, postId, author.getId())));
+                                    HttpStatus.UNAUTHORIZED, "Author not found")));
+                })
+                .flatMap(author -> {
+                    String jobId = UUID.randomUUID().toString();
+                    return writeJobStatus(jobId, MediumImportJobStatusResponse.builder()
+                                    .jobId(jobId)
+                                    .state(MediumImportJobState.PENDING)
+                                    .build())
+                            .doOnSuccess(v -> runImportJob(jobId, fetchUri, postId, author.getId())
+                                    // Detached on purpose: this method's own Mono
+                                    // (returned to the controller) completes as
+                                    // soon as the PENDING status is written, not
+                                    // when the import finishes. Errors here are
+                                    // a bug, not a normal outcome -- runImportJob
+                                    // itself already turns every expected failure
+                                    // into a written FAILED status via
+                                    // onErrorResume before this subscribe ever
+                                    // sees an error signal.
+                                    .subscribe(
+                                            v2 -> { },
+                                            e -> log.error("Unhandled error escaped runImportJob for job {}",
+                                                    jobId, e)))
+                            .thenReturn(jobId);
                 });
+    }
+
+    public Mono<MediumImportJobStatusResponse> getJobStatus(String jobId) {
+        return redisTemplate.opsForValue().get(JOB_KEY_PREFIX + jobId)
+                .cast(MediumImportJobStatusResponse.class)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Import job not found -- it may have expired (jobs are kept " + JOB_TTL.toMinutes()
+                                + " minutes) or never existed")));
+    }
+
+    private Mono<Void> writeJobStatus(String jobId, MediumImportJobStatusResponse status) {
+        return redisTemplate.opsForValue().set(JOB_KEY_PREFIX + jobId, status, JOB_TTL).then();
+    }
+
+    // Package-private (not private) purely for testability: lets a same-package
+    // test call this directly and await it with StepVerifier instead of racing
+    // startImportJob's detached .subscribe(). No behavior change.
+    Mono<Void> runImportJob(String jobId, URI fetchUri, String postId, Long authorId) {
+        Instant startedAt = Instant.now();
+        return writeJobStatus(jobId, MediumImportJobStatusResponse.builder()
+                        .jobId(jobId).state(MediumImportJobState.RUNNING).build())
+                .then(fetchArticlePage(fetchUri))
+                .flatMap(apolloState -> buildPost(apolloState, postId, authorId))
+                .timeout(JOB_SAFETY_TIMEOUT)
+                .flatMap(result -> writeJobStatus(jobId, MediumImportJobStatusResponse.builder()
+                        .jobId(jobId)
+                        .state(MediumImportJobState.DONE)
+                        .postId(result.getPostId())
+                        .slug(result.getSlug())
+                        .title(result.getTitle())
+                        .imagesImported(result.getImagesImported())
+                        .imagesFailed(result.getImagesFailed())
+                        .warnings(result.getWarnings())
+                        .build()))
+                .onErrorResume(e -> {
+                    String message = (e instanceof ResponseStatusException rse)
+                            ? rse.getReason()
+                            : "Import failed unexpectedly -- check docker logs blog_backend";
+                    log.warn("Medium import job {} failed: {}", jobId, message, e);
+                    return writeJobStatus(jobId, MediumImportJobStatusResponse.builder()
+                            .jobId(jobId)
+                            .state(MediumImportJobState.FAILED)
+                            .errorMessage(message)
+                            .build());
+                })
+                .doOnSuccess(v -> log.info("Medium import job {} reached a terminal state in {}ms", jobId,
+                        Duration.between(startedAt, Instant.now()).toMillis()));
     }
 
     private String extractPostId(URI fetchUri) {
@@ -118,11 +225,20 @@ public class MediumImportService {
     // codebase for outbound HTTP).
     private Mono<JsonNode> fetchArticlePage(URI fetchUri) {
         WebClient webClient = redirectFollowingWebClient();
+        Instant startedAt = Instant.now();
         return webClient.get()
                 .uri(fetchUri)
                 .retrieve()
                 .bodyToMono(String.class)
                 .timeout(Duration.ofSeconds(15))
+                // Logged before any parsing is attempted -- if maxInMemorySize
+                // (10MB, see redirectFollowingWebClient below) is ever too small
+                // again for some future article, this line makes that instantly
+                // obvious in docker logs blog_backend instead of needing to
+                // re-derive it from a bare Cloudflare 502 the way the original
+                // incident required.
+                .doOnNext(html -> log.info("Fetched Medium article page: {} chars in {}ms",
+                        html.length(), Duration.between(startedAt, Instant.now()).toMillis()))
                 .onErrorMap(e -> !(e instanceof ResponseStatusException), e ->
                         new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                                 "Could not fetch article from Medium: " + e.getMessage()))
@@ -186,20 +302,31 @@ public class MediumImportService {
                                 .build()));
     }
 
-    // Sequential (concatMap), not parallel -- avoids hammering miro.medium.com
-    // with a burst of concurrent requests and keeps output order deterministic.
+    // Bounded concurrency (flatMapSequential, not a fully sequential concatMap)
+    // cuts total wall-clock time for image-heavy articles, which is what
+    // actually determines whether the whole import finishes inside
+    // IMPORT_OVERALL_TIMEOUT above. flatMapSequential (unlike plain flatMap)
+    // still emits results in the original block order even though downloads
+    // run concurrently, so blockMarkdown/blockTypes stay correctly ordered
+    // without needing to sort by an explicit index afterward.
     private Mono<String> resolveBody(List<ParagraphBlock> blocks, AtomicInteger imagesImported,
                                       AtomicInteger imagesFailed) {
         List<String> blockMarkdown = new ArrayList<>();
         List<String> blockTypes = new ArrayList<>();
+        Instant startedAt = Instant.now();
 
         return Flux.fromIterable(blocks)
-                .concatMap(block -> resolveBlockMarkdown(block, imagesImported, imagesFailed)
+                .flatMapSequential(block -> resolveBlockMarkdown(block, imagesImported, imagesFailed)
                         .doOnNext(md -> {
                             blockMarkdown.add(md);
                             blockTypes.add(block.type());
-                        }))
-                .then(Mono.fromCallable(() -> MediumArticleConverter.assembleMarkdown(blockMarkdown, blockTypes)));
+                        }), IMAGE_DOWNLOAD_CONCURRENCY)
+                .then(Mono.fromCallable(() -> {
+                    log.info("Resolved {} blocks ({} images imported, {} failed) in {}ms",
+                            blocks.size(), imagesImported.get(), imagesFailed.get(),
+                            Duration.between(startedAt, Instant.now()).toMillis());
+                    return MediumArticleConverter.assembleMarkdown(blockMarkdown, blockTypes);
+                }));
     }
 
     private Mono<String> resolveBlockMarkdown(ParagraphBlock block, AtomicInteger imagesImported,
@@ -257,11 +384,20 @@ public class MediumImportService {
     // as an IllegalReferenceCountException that left the response hanging
     // until Cloudflare's edge gave up with its own 502, instead of this
     // service's own error handling ever getting a chance to run.
-    private WebClient redirectFollowingWebClient() {
+    // protected (not private) purely for testability: a test subclass can
+    // override this to return a WebClient wired to a fake ExchangeFunction
+    // instead of a real Netty connector, so fetchArticlePage/
+    // downloadAndStoreImage exercise their real parsing/error-handling logic
+    // against canned in-process responses -- no real network call, and the
+    // SSRF host allowlist in validateFetchUrl is untouched (the fetchUri
+    // passed in still has to be a genuine medium.com host; only the actual
+    // HTTP dispatch is intercepted, not which hosts are accepted). No
+    // behavior change for the real, unsubclassed service.
+    protected WebClient redirectFollowingWebClient() {
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create().followRedirect(true)))
                 .exchangeStrategies(ExchangeStrategies.builder()
-                        .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
+                        .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(25 * 1024 * 1024))
                         .build())
                 .build();
     }

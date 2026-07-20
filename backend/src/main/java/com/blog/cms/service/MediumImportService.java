@@ -302,31 +302,42 @@ public class MediumImportService {
                                 .build()));
     }
 
+    private record ResolvedBlock(String type, String markdown) {
+    }
+
     // Bounded concurrency (flatMapSequential, not a fully sequential concatMap)
     // cuts total wall-clock time for image-heavy articles, which is what
     // actually determines whether the whole import finishes inside
-    // JOB_SAFETY_TIMEOUT above. flatMapSequential (unlike plain flatMap)
-    // still emits results in the original block order even though downloads
-    // run concurrently, so blockMarkdown/blockTypes stay correctly ordered
-    // without needing to sort by an explicit index afterward.
+    // JOB_SAFETY_TIMEOUT above. flatMapSequential (unlike plain flatMap) still
+    // *emits downstream* in the original block order even though downloads
+    // run concurrently -- but that guarantee only applies to what's collected
+    // from the operator itself. An earlier version of this method instead
+    // appended to blockMarkdown/blockTypes from a doOnNext on each inner
+    // Mono, which fires the moment that block's own async work (e.g. an image
+    // download) completes -- i.e. in real-world completion order, not
+    // emission order. With concurrency 3, a fast text block queued behind a
+    // slow in-flight image download would finish first and jump the queue,
+    // and two images racing each other could land in either order -- exactly
+    // the intermittent Fig-N-before-Fig-(N-1) reordering seen in production.
+    // Collecting the operator's own ordered output via collectList() instead
+    // of relying on side effects is what actually honors the ordering
+    // guarantee.
     private Mono<String> resolveBody(List<ParagraphBlock> blocks, AtomicInteger imagesImported,
                                       AtomicInteger imagesFailed) {
-        List<String> blockMarkdown = new ArrayList<>();
-        List<String> blockTypes = new ArrayList<>();
         Instant startedAt = Instant.now();
 
         return Flux.fromIterable(blocks)
                 .flatMapSequential(block -> resolveBlockMarkdown(block, imagesImported, imagesFailed)
-                        .doOnNext(md -> {
-                            blockMarkdown.add(md);
-                            blockTypes.add(block.type());
-                        }), IMAGE_DOWNLOAD_CONCURRENCY)
-                .then(Mono.fromCallable(() -> {
+                        .map(md -> new ResolvedBlock(block.type(), md)), IMAGE_DOWNLOAD_CONCURRENCY)
+                .collectList()
+                .map(resolved -> {
                     log.info("Resolved {} blocks ({} images imported, {} failed) in {}ms",
                             blocks.size(), imagesImported.get(), imagesFailed.get(),
                             Duration.between(startedAt, Instant.now()).toMillis());
+                    List<String> blockMarkdown = resolved.stream().map(ResolvedBlock::markdown).toList();
+                    List<String> blockTypes = resolved.stream().map(ResolvedBlock::type).toList();
                     return MediumArticleConverter.assembleMarkdown(blockMarkdown, blockTypes);
-                }));
+                });
     }
 
     private Mono<String> resolveBlockMarkdown(ParagraphBlock block, AtomicInteger imagesImported,

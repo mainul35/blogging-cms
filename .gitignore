@@ -29,3 +29,13 @@ Thumbs.db
 .env
 .env.deploy
 .env.prod
+
+# Local mirror of the AFFiNE workspace docs -- personal reference only,
+# canonical copy lives at https://docs.mainul35.dev. Credentials Vault is
+# deliberately NOT mirrored here (see memory.md).
+docs/plan.md
+docs/memory.md
+docs/deployment.md
+docs/troubleshooting.md
+docs/infrastructure.md
+docs/ops-scripts.md

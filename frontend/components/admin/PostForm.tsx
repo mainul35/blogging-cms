@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { MarkdownEditor } from '@mainul35/markdown-editor';
+import '@mainul35/markdown-editor/styles.css';
 import { Post, PostRequest, PostStatus } from '@/types/post';
-import Editor from './Editor';
 import CoverImageUpload from './CoverImageUpload';
 import { api } from '@/lib/api';
+import { uploadImage } from '@/lib/upload';
 
 interface PostFormProps {
   initialData?: Post;
@@ -76,7 +78,7 @@ export default function PostForm({ initialData, onSubmit }: PostFormProps) {
 
       <div>
         <label className="block text-sm font-medium mb-1">Content</label>
-        <Editor value={content} onChange={setContent} />
+        <MarkdownEditor value={content} onChange={setContent} onUploadImage={uploadImage} />
       </div>
 
       <div className="flex items-center justify-between pt-2">

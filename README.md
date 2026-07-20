@@ -7,14 +7,18 @@ A full-stack Blog/CMS — Next.js 14 frontend + Spring Boot 3 WebFlux backend.
 Requires Docker, Java 21, and Node 18+.
 
 ```bash
-# 1. Start infra (PostgreSQL + Redis; Mailpit is optional, see below)
-docker-compose up -d
-
-# 2. Start the backend (applies DB migrations automatically on boot)
+# 1. Start the backend (applies DB migrations automatically on boot).
+#    spring-boot-docker-compose (developmentOnly, see backend/build.gradle)
+#    runs `docker compose up` against the root docker-compose.yml for you on
+#    startup, and stops those containers again on shutdown -- no separate
+#    `docker-compose up -d` step needed. If you'd rather manage the
+#    containers yourself (e.g. keep them running across restarts), run
+#    `docker-compose up -d` manually first; Spring Boot detects they're
+#    already up and leaves them alone.
 cd backend
 ./gradlew bootRun          # Windows: .\gradlew.bat bootRun
 
-# 3. Start the frontend, in a separate terminal
+# 2. Start the frontend, in a separate terminal
 cd frontend
 npm install
 npm run dev
@@ -24,7 +28,7 @@ Then open `http://localhost:3000`. First run redirects to `/setup` to create you
 
 - Backend: `http://localhost:8080`
 - Frontend: `http://localhost:3000`
-- Email sandbox (optional): `docker-compose up -d mailpit`, then set provider **smtp**, host `localhost`, port `1025`, auth/STARTTLS off in Settings → Mail — every email shows up at `http://localhost:8025` instead of a real inbox.
+- Email sandbox (optional, already running alongside postgres/redis from step 1): set provider **smtp**, host `localhost`, port `1025`, auth/STARTTLS off in Settings → Mail — every email shows up at `http://localhost:8025` instead of a real inbox. Not used unless you configure it (`mail_settings` seeds provider "log").
 
 ## Configuration
 

@@ -125,54 +125,55 @@ class MediumArticleConverterTest {
     }
 
     @Test
-    void stripDuplicateTitleAndCover_removesLeadingHeadingMatchingTitleAndTheImageMatchingPreviewImage() {
-        // Mirrors a real article's shape: the body's first paragraph is a
-        // heading repeating the title verbatim, and the first inline image
-        // is the same asset as the post's own previewImage.
+    void stripDuplicateTitleHeading_removesLeadingHeadingMatchingTitle() {
         List<ParagraphBlock> blocks = List.of(
                 new ParagraphBlock("H3", "My Article Title", null, null, null),
-                new ParagraphBlock("IMG", null, "1*cover.png", null, null),
                 new ParagraphBlock("P", "Real body text.", null, null, null));
 
-        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleAndCover(
-                blocks, "My Article Title", "1*cover.png");
+        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleHeading(blocks, "My Article Title");
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).type()).isEqualTo("P");
     }
 
     @Test
-    void stripDuplicateTitleAndCover_keepsHeadingThatOnlyResemblesTheTitle() {
+    void stripDuplicateTitleHeading_keepsHeadingThatOnlyResemblesTheTitle() {
         List<ParagraphBlock> blocks = List.of(
                 new ParagraphBlock("H3", "My Article Title (Updated)", null, null, null),
                 new ParagraphBlock("P", "Real body text.", null, null, null));
 
-        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleAndCover(
-                blocks, "My Article Title", "1*cover.png");
+        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleHeading(blocks, "My Article Title");
 
         assertThat(result).hasSize(2);
     }
 
     @Test
-    void stripDuplicateTitleAndCover_keepsUnrelatedInlineImages() {
+    void stripDuplicateTitleHeading_keepsInlineImageMatchingThePreviewImage() {
+        // Confirms the reversed behavior directly: the previous version of
+        // this method also silently deleted the body's copy of whatever
+        // image matched previewImage.id, which meant that image vanished
+        // entirely (not shown as cover, not shown in body) the moment an
+        // admin changed the cover to something else after import, with no
+        // way back short of re-importing. It's kept now -- see this
+        // method's own comment for the full reasoning.
         List<ParagraphBlock> blocks = List.of(
                 new ParagraphBlock("H3", "My Article Title", null, null, null),
-                new ParagraphBlock("IMG", null, "1*unrelated.png", null, null));
+                new ParagraphBlock("IMG", null, "1*cover.png", null, null),
+                new ParagraphBlock("P", "Real body text.", null, null, null));
 
-        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleAndCover(
-                blocks, "My Article Title", "1*cover.png");
+        List<ParagraphBlock> result = MediumArticleConverter.stripDuplicateTitleHeading(blocks, "My Article Title");
 
-        assertThat(result).hasSize(1);
+        assertThat(result).hasSize(2);
         assertThat(result.get(0).type()).isEqualTo("IMG");
-        assertThat(result.get(0).imageId()).isEqualTo("1*unrelated.png");
+        assertThat(result.get(0).imageId()).isEqualTo("1*cover.png");
     }
 
     @Test
-    void stripDuplicateTitleAndCover_handlesEmptyOrNullInputsGracefully() {
-        assertThat(MediumArticleConverter.stripDuplicateTitleAndCover(List.of(), "Title", "1*x.png")).isEmpty();
+    void stripDuplicateTitleHeading_handlesEmptyOrNullInputsGracefully() {
+        assertThat(MediumArticleConverter.stripDuplicateTitleHeading(List.of(), "Title")).isEmpty();
 
         List<ParagraphBlock> blocks = List.of(new ParagraphBlock("P", "Text", null, null, null));
-        assertThat(MediumArticleConverter.stripDuplicateTitleAndCover(blocks, null, null)).hasSize(1);
+        assertThat(MediumArticleConverter.stripDuplicateTitleHeading(blocks, null)).hasSize(1);
     }
 
     @Test
@@ -231,9 +232,52 @@ class MediumArticleConverterTest {
         assertThat(blocks.get(0).type()).isEqualTo("H3");
         assertThat(blocks.get(2).type()).isEqualTo("IMG");
         assertThat(blocks.get(2).imageId()).isEqualTo("1*abc123.png");
+        // Fixture's p_2 has an empty text field -- no caption -- so this
+        // must come back null, not an empty string. See the captioned-image
+        // test below for the non-empty case.
+        assertThat(blocks.get(2).renderedText()).isNull();
         assertThat(blocks.get(5).type()).isEqualTo("PRE");
         assertThat(blocks.get(5).codeLang()).isEqualTo("shell");
         assertThat(MediumArticleConverter.markdownFor(blocks.get(5))).isEqualTo("```shell\necho hello\n```");
+    }
+
+    @Test
+    void parseParagraphs_imageWithCaption_capturesItAsRenderedTextWithMarkupsApplied() throws Exception {
+        JsonNode imgNode = objectMapper.readTree("""
+                {"__typename":"Paragraph","type":"IMG","text":"Fig 1: architecture overview",
+                 "metadata":{"__typename":"ImageMetadata","id":"1*fig1.png"},
+                 "markups":[{"__typename":"Markup","type":"STRONG","start":0,"end":5}]}
+                """);
+        List<String> warnings = new ArrayList<>();
+
+        List<ParagraphBlock> blocks = MediumArticleConverter.parseParagraphs(List.of(imgNode), warnings);
+
+        assertThat(blocks).hasSize(1);
+        assertThat(blocks.get(0).imageId()).isEqualTo("1*fig1.png");
+        assertThat(blocks.get(0).renderedText()).isEqualTo("**Fig 1**: architecture overview");
+    }
+
+    @Test
+    void imageMarkdownWithCaption_noCaption_plainImageOnly() {
+        assertThat(MediumArticleConverter.imageMarkdownWithCaption("/uploads/a.png", null))
+                .isEqualTo("![](/uploads/a.png)");
+    }
+
+    @Test
+    void imageMarkdownWithCaption_withCaption_setsAltTextAndVisibleCaptionLine() {
+        assertThat(MediumArticleConverter.imageMarkdownWithCaption("/uploads/a.png", "Fig 1"))
+                .isEqualTo("![Fig 1](/uploads/a.png)\n\n*Fig 1*");
+    }
+
+    @Test
+    void imageMarkdownWithCaption_captionWithBracketsAndNewline_sanitizedInAltTextOnly() {
+        String markdown = MediumArticleConverter.imageMarkdownWithCaption("/uploads/a.png", "Fig [1]\nSee note");
+
+        // Alt text (inside [...]) must not contain unescaped brackets/newlines
+        // or it would prematurely close the markdown image syntax.
+        assertThat(markdown).startsWith("![Fig (1) See note](/uploads/a.png)");
+        // The visible caption line below keeps the raw, unsanitized text.
+        assertThat(markdown).endsWith("\n\n*Fig [1]\nSee note*");
     }
 
     @Test

@@ -156,17 +156,26 @@ public final class MediumArticleConverter {
     }
 
     // Medium always repeats the article title as the body's own first
-    // paragraph (a heading matching the title verbatim), and the cover/
-    // preview image is typically also the first inline image in the body --
-    // confirmed against a real article, where the first paragraph was an H3
-    // exactly matching the title, and its immediately-following IMG
-    // paragraph's metadata.id was the exact same asset as the post's
-    // previewImage.id. Both are already rendered separately by the post page
-    // template (title + coverImageUrl), so leaving them in the markdown body
-    // too would show them twice. Only removes an exact match -- a heading
-    // that merely resembles the title, or an unrelated image, is left alone.
-    public static List<ParagraphBlock> stripDuplicateTitleAndCover(List<ParagraphBlock> blocks, String title,
-                                                                     String previewImageId) {
+    // paragraph (a heading matching the title verbatim) -- confirmed against
+    // a real article. That's already rendered separately by the post page
+    // template (its own <h1>/title), so leaving it in the markdown body too
+    // would show it twice. Only removes an exact match -- a heading that
+    // merely resembles the title is left alone.
+    //
+    // Does NOT also strip the body's copy of the cover/preview image
+    // (previous behavior, removed): previewImage.id is typically the same
+    // asset as the first inline image, but it's Medium's own pick, not
+    // necessarily where the admin wants their post's cover to stay pinned.
+    // Silently deleting that paragraph from the body meant that if the admin
+    // later changed the cover image in the editor, the original image was
+    // gone from the article entirely -- not shown as cover (now something
+    // else) and not shown inline (already deleted) -- leaving a gap with no
+    // way back except re-importing. Leaving it in the body risks it
+    // appearing twice right after import (once as the cover banner, once
+    // inline at its original position) -- a purely cosmetic duplicate the
+    // admin can delete themselves from the one place they don't want it,
+    // which is a much smaller problem than the content loss above.
+    public static List<ParagraphBlock> stripDuplicateTitleHeading(List<ParagraphBlock> blocks, String title) {
         List<ParagraphBlock> result = new ArrayList<>(blocks);
         if (!result.isEmpty()) {
             ParagraphBlock first = result.get(0);
@@ -174,14 +183,6 @@ public final class MediumArticleConverter {
             if (isHeading && title != null && first.renderedText() != null
                     && first.renderedText().trim().equalsIgnoreCase(title.trim())) {
                 result.remove(0);
-            }
-        }
-        if (previewImageId != null && !previewImageId.isBlank()) {
-            for (int i = 0; i < result.size(); i++) {
-                if ("IMG".equals(result.get(i).type()) && previewImageId.equals(result.get(i).imageId())) {
-                    result.remove(i);
-                    break;
-                }
             }
         }
         return result;
@@ -200,7 +201,12 @@ public final class MediumArticleConverter {
                 case "IMG" -> {
                     String imageId = node.path("metadata").path("id").asText(null);
                     if (imageId != null && !imageId.isBlank()) {
-                        blocks.add(new ParagraphBlock(type, null, imageId, null, null));
+                        // Medium stores a figure's caption (e.g. "Fig 1") as
+                        // this same paragraph's own text field -- confirmed
+                        // against a real captioned image. Reusing renderedText
+                        // for it, same as every other paragraph type.
+                        String caption = applyMarkups(text, node.path("markups"));
+                        blocks.add(new ParagraphBlock(type, caption.isBlank() ? null : caption, imageId, null, null));
                     }
                 }
                 case "IFRAME", "MIXTAPE_EMBED" -> {
@@ -302,6 +308,31 @@ public final class MediumArticleConverter {
             case "IMG" -> null;
             default -> block.renderedText();
         };
+    }
+
+    // Builds the markdown for a successfully-downloaded image, including its
+    // caption if Medium had one. The caption becomes both the image's alt
+    // text and a separate visible italic line below it -- alt text alone
+    // isn't rendered under a working image by any Markdown viewer (only
+    // shown if the image fails to load), so relying on it alone would still
+    // lose the caption's visibility even though the text is technically
+    // preserved. Pure/static like the rest of this class -- the caller
+    // (MediumImportService) supplies the already-downloaded url once it has one.
+    public static String imageMarkdownWithCaption(String url, String caption) {
+        String altText = caption != null ? sanitizeAltText(caption) : "";
+        String markdown = "![" + altText + "](" + url + ")";
+        if (caption != null && !caption.isBlank()) {
+            markdown += "\n\n*" + caption + "*";
+        }
+        return markdown;
+    }
+
+    // Markdown alt text lives inside [...], so a literal ']' would
+    // prematurely close it; a literal newline would break the image syntax
+    // onto multiple lines. Medium captions are short plain text in practice,
+    // so this is a minimal safety net, not a full markdown-escaping pass.
+    private static String sanitizeAltText(String text) {
+        return text.replace("[", "(").replace("]", ")").replace("\n", " ").trim();
     }
 
     private static boolean isListType(String type) {

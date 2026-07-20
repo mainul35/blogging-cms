@@ -278,8 +278,8 @@ public class MediumImportService {
         JsonNode paragraphRefs = content.path("bodyModel").path("paragraphs");
         List<JsonNode> resolvedParagraphs = MediumArticleConverter.resolveParagraphRefs(
                 paragraphRefs, apolloState, warnings);
-        List<ParagraphBlock> blocks = MediumArticleConverter.stripDuplicateTitleAndCover(
-                MediumArticleConverter.parseParagraphs(resolvedParagraphs, warnings), title, previewImageId);
+        List<ParagraphBlock> blocks = MediumArticleConverter.stripDuplicateTitleHeading(
+                MediumArticleConverter.parseParagraphs(resolvedParagraphs, warnings), title);
 
         AtomicInteger imagesImported = new AtomicInteger();
         AtomicInteger imagesFailed = new AtomicInteger();
@@ -305,7 +305,7 @@ public class MediumImportService {
     // Bounded concurrency (flatMapSequential, not a fully sequential concatMap)
     // cuts total wall-clock time for image-heavy articles, which is what
     // actually determines whether the whole import finishes inside
-    // IMPORT_OVERALL_TIMEOUT above. flatMapSequential (unlike plain flatMap)
+    // JOB_SAFETY_TIMEOUT above. flatMapSequential (unlike plain flatMap)
     // still emits results in the original block order even though downloads
     // run concurrently, so blockMarkdown/blockTypes stay correctly ordered
     // without needing to sort by an explicit index afterward.
@@ -334,7 +334,7 @@ public class MediumImportService {
         if ("IMG".equals(block.type())) {
             return downloadAndStoreImage(block.imageId())
                     .doOnNext(url -> imagesImported.incrementAndGet())
-                    .map(url -> "![](" + url + ")")
+                    .map(url -> MediumArticleConverter.imageMarkdownWithCaption(url, block.renderedText()))
                     .switchIfEmpty(Mono.fromCallable(() -> {
                         imagesFailed.incrementAndGet();
                         return "*[Image could not be imported]*";

@@ -44,7 +44,7 @@ export default function PostForm({ initialData, onSubmit }: PostFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-3xl">
+    <form onSubmit={handleSubmit} className="space-y-6">
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       <div>

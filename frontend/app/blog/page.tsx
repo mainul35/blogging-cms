@@ -19,9 +19,6 @@ export default async function BlogPage() {
         {/* Hero Banner */}
         <section className="text-center mb-12">
           <h1 className="text-5xl font-bold text-gray-900 mb-4">Welcome to {siteName}</h1>
-          <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
-            Discover insightful stories, tutorials, and ideas from our community of writers.
-          </p>
         </section>
 
         {/* Realtime search + results grid -- client component, filters the
